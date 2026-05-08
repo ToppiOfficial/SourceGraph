@@ -222,4 +222,4 @@ crash/
 .vscode
 _testcases/
 workspace/autosave.json
-workspace/recent_nodes.json
+config/recent_nodes.json

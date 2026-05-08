@@ -3,13 +3,16 @@ import os
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsItem
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtGui import QKeyEvent, QKeySequence, QPainter
 
 from gui.panels.base_panel import BasePanel
 from core.node import BaseNode, Port, PortType
 from core.graph import Graph
 from gui.node_editor import NodeEditorScene, NodeEditorView
 from gui.theme import ACCENT, BG_RAISED
+from gui.widgets.safe_graphics_view import SafeGraphicsView
+from gui.items.node import NodeItem
+from gui.items.wire import ConnectionItem
 
 class NavGraphNode(BaseNode):
     """Minimal node for the hierarchy navigation graph."""
@@ -26,9 +29,12 @@ class NavGraphNode(BaseNode):
             if nav_node.graph._is_dirty:
                 self.title += " (!)"
 
-from gui.widgets.safe_graphics_view import SafeGraphicsView
 class GraphMapView(SafeGraphicsView):
     """Custom view for the Graph Map that blocks editing shortcuts."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform | QPainter.TextAntialiasing)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Delete or event.matches(QKeySequence.Copy) or \
            event.matches(QKeySequence.Paste) or (event.key() == Qt.Key_D and event.modifiers() & Qt.ShiftModifier):
@@ -136,8 +142,6 @@ class GraphMapPanel(BasePanel):
 
         self.map_scene.blockSignals(False)
         
-        from gui.items.node import NodeItem
-        from gui.items.wire import ConnectionItem
         for item in self.map_scene.items():
             item.setFlag(QGraphicsItem.ItemIsMovable, False)
             if isinstance(item, ConnectionItem): item.setFlag(QGraphicsItem.ItemIsSelectable, False)

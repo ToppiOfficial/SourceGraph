@@ -68,6 +68,12 @@ class MinimapWidget(QWidget):
             painter.end()
             return
 
+        # without this, subgraph editing will result in a fatal error
+        if not nodes:
+            self._draw_overlay_controls(painter)
+            painter.end()
+            return
+
         rect = nodes[0].sceneBoundingRect()
         for n in nodes[1:]:
             rect = rect.united(n.sceneBoundingRect())
@@ -167,7 +173,7 @@ class MinimapWidget(QWidget):
             return
             
         rect = valid_nodes[0].sceneBoundingRect()
-        for n in nodes[1:]:
+        for n in valid_nodes[1:]:
             nr = n.sceneBoundingRect()
             if not nr.isEmpty():
                 rect = rect.united(nr)

@@ -9,7 +9,7 @@ class RecentNodeManager:
     
     def __init__(self, max_recent: int = 10, storage_path: str | None = None):
         self.max_recent = max_recent
-        self.storage_path = storage_path or os.path.join("workspace", "recent_nodes.json")
+        self.storage_path = storage_path or os.path.join("config", "recent_nodes.json")
         self._recent_nodes: List[str] = []
         self.load_recent_nodes()
     
