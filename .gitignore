@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+config/
+crash/
+.vscode
+_testcases/
+workspace/autosave.json
+workspace/recent_nodes.json
