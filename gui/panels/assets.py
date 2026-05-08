@@ -1,0 +1,339 @@
+from __future__ import annotations
+
+import os
+import json
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QFileDialog, QTreeWidget, QTreeWidgetItem,
+    QHeaderView, QMenu,
+)
+from PySide6.QtCore import Qt, QMimeData
+from PySide6.QtGui import QColor, QFont
+
+from gui.widgets.basic_shapes import ShapeDrawer
+from gui.dialogs import RenameDialog
+from gui.theme import *
+from gui.panels.base_panel import BasePanel
+from gui.panels.base_browser import BaseBrowserWidget, BaseBrowserTree
+
+
+class AssetTreeWidget(BaseBrowserTree):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setColumnCount(3)
+        self.setColumnHidden(1, True)
+        self.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.header().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.setStyleSheet(TREE_STYLE)
+
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        self._refresh_folder_spans()
+
+    def _refresh_folder_spans(self):
+        """Re-apply first-column spanning for all folders recursively."""
+        root = self.invisibleRootItem()
+        stack = [(root, self.rootIndex())]
+        while stack:
+            parent_item, parent_idx = stack.pop()
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
+                if child.data(0, self._T) == "folder":
+                    self.setFirstColumnSpanned(i, parent_idx, True)
+                    stack.append((child, self.indexFromItem(child)))
+
+    def add_folder(self, name: str, parent: QTreeWidgetItem | None = None) -> QTreeWidgetItem:
+        item = super().add_folder(name, parent)
+        self._refresh_folder_spans()
+        return item
+
+    def mimeData(self, items):
+        data = super().mimeData(items)
+        paths = []
+
+        def _collect(it):
+            if it.data(0, self._T) == "asset":
+                paths.append(it.text(2))
+            elif it.data(0, self._T) == "folder":
+                for i in range(it.childCount()):
+                    _collect(it.child(i))
+
+        for item in items:
+            _collect(item)
+
+        if paths:
+            data.setText(json.dumps({"type": "assets", "paths": list(dict.fromkeys(paths))}))
+        return data
+
+    def add_asset(self, path: str, parent: QTreeWidgetItem | None = None) -> QTreeWidgetItem:
+        ext  = os.path.splitext(path)[1][1:].upper() or "FILE"
+        name = os.path.basename(path)
+        item = QTreeWidgetItem(self if parent is None else parent)
+        item.setData(0, self._T, "asset")
+        item.setText(0, name)
+        item.setText(1, ext)
+        item.setText(2, path)
+        
+        font = QFont()
+        font.setBold(True)
+        item.setFont(0, font)
+        
+        # Set tooltips for all columns to show full information on hover
+        item.setToolTip(0, f"Name: {name}\nPath: {path}\nType: {ext}")
+        item.setToolTip(1, f"Type: {ext}\nPath: {path}")
+        item.setToolTip(2, path)
+        
+        # Set custom file icon based on readability and type
+        if os.path.exists(path):
+            if is_file_readable(path):
+                # Use first letter of filename for readable files
+                letter = name[0].upper() if name else "A"
+                # Check if it's an image file
+                is_image = is_image_file(path)
+                item.setIcon(0, get_file_icon(letter=letter, is_image=is_image))
+            else:
+                # Use blank file icon for binary/unreadable files
+                item.setIcon(0, get_blank_file_icon())
+        else:
+            # Use blank file icon for missing files
+            item.setIcon(0, get_blank_file_icon())
+        
+        item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
+        return item
+
+    def _all_assets(self):
+        """Depth-first iteration over all asset items (ignores folders)."""
+        root  = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            item = stack.pop()
+            if item.data(0, self._T) == "asset":
+                yield item
+            for i in range(item.childCount()):
+                stack.append(item.child(i))
+
+    def all_paths(self) -> list[str]:
+        return [it.text(2) for it in self._all_assets()]
+
+
+class AssetBrowserWidget(BaseBrowserWidget):
+    def __init__(self, main_window: "MainWindow", parent=None):  # pyright: ignore
+        super().__init__(main_window, parent)
+        self._is_updating = False
+
+    def _setup_tree(self, layout):
+        """Setup the asset tree widget."""
+        self.tree_widget = AssetTreeWidget()
+        layout.addWidget(self.tree_widget)
+        # Setup context menu from base class
+        self._setup_tree_context_menu(self.tree_widget)
+
+    def _setup_connections(self):
+        """Setup signal connections for assets."""
+        self.tree_widget.deleteRequested.connect(self._on_delete)
+        self.tree_widget.hierarchyChanged.connect(self._on_hierarchy_changed)
+
+    def _fill_menu(self, menu: QMenu, item: QTreeWidgetItem | None = None):
+        """Populate menu with asset actions."""
+        if item is None:
+            menu.addAction("Import Files...", self._on_import)
+            menu.addAction("Add Folder...", self._on_add_folder)
+            menu.addAction("Find Missing...", self._on_find_missing)
+    
+    def _fill_folder_menu(self, menu: QMenu, folder_item: QTreeWidgetItem):
+        """Populate menu with folder-specific actions."""
+        menu.addAction("Import Files...", lambda: self._on_import_to_folder(folder_item))
+        menu.addSeparator()
+        menu.addAction("Add Folder...", lambda: self._on_add_subfolder(folder_item))
+
+    def _show_action_menu(self):
+        """Show action menu from '=' button click."""
+        menu = QMenu(self)
+        menu.setStyleSheet(MENU)
+        self._fill_menu(menu)
+
+        button_rect = self.action_btn.geometry()
+        menu_pos = self.action_btn.mapToGlobal(button_rect.bottomLeft())
+        menu.exec(menu_pos)
+
+    # -- public API -----------------------------------------------------------
+
+    def refresh(self):
+        """Rebuild from graph state (undo/redo)."""
+        if self._is_updating or not self.main_window.graph:
+            return
+        
+        # Prioritize layout; fallback to flat assets ONLY if layout is completely missing
+        layout = self.main_window.graph.asset_layout
+        if layout is not None:
+            self.set_assets(layout)
+        else:
+            self.set_assets(self.main_window.graph.assets)
+
+    def _serialize_leaf(self, item: QTreeWidgetItem) -> dict:
+        return {"type": "asset", "path": item.text(2)}
+
+    def set_assets(self, data: list) -> None:
+        self._is_updating = True
+        try:
+            self.tree_widget.clear()
+            
+            def _apply(items, parent=None):
+                for d in items:
+                    if isinstance(d, str): # Legacy flat list
+                        self.tree_widget.add_asset(d, parent)
+                    elif d.get("type") == "folder":
+                        folder = self.tree_widget.add_folder(d["name"], parent)
+                        folder.setExpanded(d.get("expanded", True))
+                        _apply(d.get("children", []), folder)
+                    else:
+                        self.tree_widget.add_asset(d.get("path", ""), parent)
+            _apply(data, None)
+            self.tree_widget._refresh_folder_spans()
+            self.refresh_status()
+        finally:
+            self._is_updating = False
+
+    def refresh_status(self) -> None:
+        """Highlight missing files in red."""
+        for item in self.tree_widget._all_assets():
+            path = item.text(2)
+            if not os.path.exists(path):
+                item.setForeground(0, QColor(COLOR_INVALID))
+                item.setForeground(2, QColor(COLOR_INVALID))
+                item.setToolTip(0, f"File missing: {path}")
+            else:
+                item.setData(0, Qt.ForegroundRole, None)
+                item.setData(2, Qt.ForegroundRole, None)
+                item.setToolTip(0, path)
+
+    # -- handlers -------------------------------------------------------------
+
+    def _on_import(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Import Assets", "",
+            "Source Assets (*.dmx *.smd);;Subgraphs (*.srcsubgraph);;All (*)"
+        )
+        if not files:
+            return
+        existing = set(self.tree_widget.all_paths())
+
+        # Default to top level
+        parent = None
+        sel = self.tree_widget.selectedItems()
+        if sel:
+            s = sel[0]
+            if s.data(0, self.tree_widget._T) == "folder": # Includes root_item
+                parent = s
+            elif s.parent() and s.parent().data(0, self.tree_widget._T) == "folder": # Inside a folder
+                parent = s.parent()
+
+        with self.main_window.scene._undo_manager.transaction("Import Assets"):
+            for f in files:
+                if f not in existing:
+                    self.tree_widget.add_asset(f, parent)
+            self._sync_to_graph()
+
+    def _on_add_folder(self):
+        dlg = RenameDialog("New Folder", "New Folder", "Folder name:", self)
+        if dlg.exec_() != 1:  # QDialog.Accepted == 1
+            return
+        name = dlg.get_name().strip()
+        if name:
+            with self.main_window.scene._undo_manager.transaction("Add Folder"):
+                self.tree_widget.add_folder(name, None)
+                self._sync_to_graph()
+
+    def _on_hierarchy_changed(self):
+        if self._is_updating or not self.main_window or not self.main_window.scene: return
+        with self.main_window.scene._undo_manager.transaction("Reorder Assets"):
+            self._sync_to_graph()
+
+    def _sync_to_graph(self):
+        if not self.main_window.graph or self._is_updating:
+            return
+            
+        self._is_updating = True
+        try:
+            self.main_window.graph.assets = self.tree_widget.all_paths()
+            self.main_window.graph.asset_layout = self.get_hierarchy()
+            
+            self.refresh_status()
+            self.main_window.scene.graph_changed.emit()
+        finally:
+            self._is_updating = False
+
+    def _on_import_to_folder(self, folder_item):
+        """Import files directly into a specific folder."""
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Import Assets to Folder", "",
+            "Source Assets (*.dmx *.smd);;Subgraphs (*.srcsubgraph);;All (*)"
+        )
+        if not files:
+            return
+        existing = set(self.tree_widget.all_paths())
+        
+        with self.main_window.scene._undo_manager.transaction("Import Assets to Folder"):
+            for f in files:
+                if f not in existing:
+                    self.tree_widget.add_asset(f, folder_item)
+            self._sync_to_graph()
+    
+    def _on_add_subfolder(self, parent_folder):
+        """Add a subfolder to a specific folder."""
+        dlg = RenameDialog("New Folder", "New Folder", "Folder name:", self)
+        if dlg.exec() != 1:  # QDialog.Accepted == 1
+            return
+        name = dlg.get_name().strip()
+        if name:
+            with self.main_window.scene._undo_manager.transaction("Add Subfolder"):
+                self.tree_widget.add_folder(name, parent_folder)
+                self._sync_to_graph()
+    
+    def _on_find_missing(self):
+        missing = [p for p in self.tree_widget.all_paths() if not os.path.exists(p)]
+        if not missing:
+            return
+        # Surface missing paths; caller can extend this to a dialog
+        print(f"[Assets] Missing files: {missing}")
+    
+    def _put_selected_in_folder(self, tree_widget, selected_items, folder_name):
+        """Put selected items in a new folder."""
+        with self.main_window.scene._undo_manager.transaction("Put Items in Folder"):
+            folder = tree_widget.add_folder(folder_name)
+            root = tree_widget.invisibleRootItem()
+            for item in selected_items:
+                if item.data(0, tree_widget._T) in ["asset", "folder"]:
+                    parent = item.parent() or root
+                    parent.removeChild(item)
+                    folder.addChild(item)
+            self._sync_to_graph()
+
+
+class AssetModularPanel(BasePanel):
+    ID           = "AssetDock"
+    TITLE        = "Asset Browser"
+    DEFAULT_AREA = Qt.LeftDockWidgetArea
+    COLOR        = "#63c2df"  # Accent color for Assets panel
+
+    def __init__(self, main_window) -> None:
+        super().__init__(main_window)
+        self._widget = AssetBrowserWidget(main_window)
+        self.setWidget(self._widget)
+
+    def setup(self) -> None:
+        sc = self.main_window.scene
+        if sc:
+            sc.graph_changed.connect(self._widget.refresh)
+            self._widget.refresh()
+
+    def update_context(self, graph, scene) -> None:
+        self._widget.main_window.graph = graph
+        if self._active_scene:
+            try: self._active_scene.graph_changed.disconnect(self._widget.refresh)
+            except (TypeError, RuntimeError): pass
+            
+        self._active_scene = scene
+        scene.graph_changed.connect(self._widget.refresh)
+        self._widget.refresh()
