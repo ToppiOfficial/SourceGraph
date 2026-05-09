@@ -46,6 +46,7 @@ class Graph:
         self.on_changed: list[Callable] = []
         self._state = GraphState()
         self._is_dirty: bool = False
+        self.file_path: Path | None = None
 
     @property
     def state(self) -> GraphState:
@@ -97,6 +98,7 @@ class Graph:
     def time_unit(self, v: str): self._state.time_unit = v
 
     def _notify(self) -> None:
+        self._is_dirty = True
         for cb in self.on_changed:
             cb()
 
@@ -209,11 +211,12 @@ class Graph:
             else:
                 log.warning(f"Unknown node type '{nd.get('type')}' — skipped")
 
-        for cd in data.get("connections", []):
-            self.connections.append(Connection.from_dict(cd))
-
+        # Synchronize dynamic ports for all nodes before processing connections
         for node in self.nodes.values():
             node.sync_dynamic_ports()
+
+        for cd in data.get("connections", []):
+            self.connections.append(Connection.from_dict(cd))
 
         log.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
 
@@ -221,4 +224,5 @@ class Graph:
         Path(path).write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     def load(self, path: str | Path, registry: dict) -> None:
-        self.load_dict(json.loads(Path(path).read_text(encoding="utf-8")), registry)
+        self.file_path = Path(path).resolve()
+        self.load_dict(json.loads(self.file_path.read_text(encoding="utf-8")), registry)

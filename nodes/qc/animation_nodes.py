@@ -1,10 +1,10 @@
 from core.node import BaseNode
-
+from nodes.qc.shared_categories import QC_CATEGORY
 
 class SequenceNode(BaseNode):
     """Generates $sequence QC command."""
     title = "Sequence"
-    CATEGORY = "QC"
+    CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
     @classmethod

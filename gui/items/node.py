@@ -18,12 +18,12 @@ ROW_H     = 26   # height per port row
 PR        = 6    # port radius
 PAD       = 8    # inner horizontal padding
 MIN_W     = 120
-LBL_W     = 60   # max px reserved for a port label
+LBL_W_MIN = 60   # minimum px reserved for a port label
 
 # Input types that get an inline editable widget when unconnected.
 _EDITABLE = {PortType.ANY, PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM}
 
-def _elide(s: str, n: int = 9) -> str:
+def _elide(s: str, n: int = 25) -> str:
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
@@ -236,7 +236,17 @@ class NodeItem(QGraphicsItem):
             self.handle.setVisible(False)
 
     def on_handle_moved(self, pos: QPointF) -> None:
-        self.resize_to(pos.x(), pos.y())
+        # Scale label_width proportionally with a reduced rate and delayed threshold
+        old_w = self._w
+        new_w = pos.x()
+        
+        if new_w > DEFAULT_W + 40:
+            delta_w = (new_w - old_w) * 0.5
+            new_lbl_w = (self.node.label_width or LBL_W_MIN) + delta_w
+        else:
+            new_lbl_w = self.node.label_width or LBL_W_MIN
+            
+        self.resize_to(new_w, pos.y(), new_lbl_w)
 
     def _get_fold_indicator_rect(self) -> QRectF:
         """Get the clickable area for the fold indicator."""
@@ -244,7 +254,7 @@ class NodeItem(QGraphicsItem):
         # Position indicator on the left side of title
         return QRectF(PAD, 0, 20, text_height)
 
-    def resize_to(self, w: float, h: float = None) -> None:
+    def resize_to(self, w: float, h: float = None, lbl_w: float = None) -> None:
         if self.node.folded:
             return  # resize is blocked while folded; handle is hidden anyway
         self._is_resizing = True
@@ -254,6 +264,12 @@ class NodeItem(QGraphicsItem):
         if h is not None:
             self._h = max(self._calculate_height(), h)
             self.node.height = self._h
+        if lbl_w is not None:
+            self.node.label_width = max(LBL_W_MIN, lbl_w)
+        else:
+            if self.node.label_width is None:
+                self.node.label_width = LBL_W_MIN
+            
         self._update_ports()
         self.handle.setPos(self._w, self._h)
         sc = self.scene()
@@ -495,8 +511,8 @@ class NodeItem(QGraphicsItem):
 
     def _create_proxy(self, container: QWidget, current_y: float) -> QGraphicsProxyWidget:
         """Helper to finalize proxy placement."""
-        # Shift widget to the right of the label area (PR + PAD + LBL_W)
-        x_pos = PR + PAD + LBL_W + 2
+        lbl_w = self.node.label_width or LBL_W_MIN
+        x_pos = PR + PAD + lbl_w + 2
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(container)
         proxy.setPos(x_pos, current_y + 3)
@@ -579,7 +595,7 @@ class NodeItem(QGraphicsItem):
             
         old_val = port.value
         port.value = new_val
-        self._update_port_display(port_name)
+        #self._update_port_display(port_name)
         
         # Update node and scene
         scene = self.scene()
@@ -597,7 +613,7 @@ class NodeItem(QGraphicsItem):
             return
             
         port.value = new_value
-        self._update_port_display(port_name)
+        #self._update_port_display(port_name)
         
         # Update node and scene
         scene = self.scene()
@@ -906,14 +922,18 @@ class NodeItem(QGraphicsItem):
             if pi:
                 pi.setPos(self._w, pi.y())
 
-        # Update proxy dimensions based on their actual positions to fill the node.
+        lbl_w = self.node.label_width or LBL_W_MIN
         for name, proxy in self._proxies.items():
+            is_below = self.node.has_gui_builder(name) and getattr(self.node, '_custom_widget_below_ports', False)
+            if not is_below:
+                proxy.setPos(PR + PAD + lbl_w + 2, proxy.y())
+
             # Horizontal scaling
             right_gap = 4 if not self._output_port_names else (PR + 2)
             proxy.widget().setFixedWidth(max(10, self._w - proxy.x() - right_gap))
             
             # Vertical scaling: If it's a "below ports" custom widget, let it fill remaining space
-            if self.node.has_gui_builder(name) and getattr(self.node, '_custom_widget_below_ports', False):
+            if is_below:
                 available_h = self._h - proxy.y() - PAD
                 proxy.widget().setFixedHeight(max(10, available_h))
 
@@ -1110,6 +1130,7 @@ class NodeItem(QGraphicsItem):
             )
             visible_out_idx += 1
 
+        lbl_w = self.node.label_width or LBL_W_MIN
         row_offset_y = TITLE_H + visible_out_idx * ROW_H
         for name, port in self.node.inputs.items():
             is_editable = port.port_type in _EDITABLE and port.editable
@@ -1119,9 +1140,9 @@ class NodeItem(QGraphicsItem):
             # Always draw the left-side label in the scene
             painter.setPen(label_col)
             painter.drawText(
-                QRectF(PR + PAD, row_offset_y, LBL_W, ROW_H),
+                QRectF(PR + PAD, row_offset_y, lbl_w, ROW_H),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                _elide(port.label or name),
+                _elide(port.label or name, int(lbl_w / 6)),
             )
             # When connected: show the live value text on the right (proxy is hidden)
             if is_editable:
@@ -1136,7 +1157,7 @@ class NodeItem(QGraphicsItem):
                                 str(src_port.value) if src_port.value is not None else ""
                             )
                             if val_text:
-                                widget_x = PR + PAD + LBL_W + 2
+                                widget_x = PR + PAD + lbl_w + 2
                                 painter.setPen(value_col)
                                 painter.drawText(
                                     QRectF(widget_x, row_offset_y,
@@ -1157,14 +1178,6 @@ class NodeItem(QGraphicsItem):
                     sc._after_node_mutation(self.node.id)
         return super().itemChange(change, value)
     
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release to trigger graph change after movement ends."""
-        result = super().mouseReleaseEvent(event)
-        sc = self.scene()
-        if sc and hasattr(sc, '_emit_graph_changed'):
-            sc._emit_graph_changed()
-        return result
-
     def mousePressEvent(self, event):
         """Handle clicks on the fold indicator area."""
         if event.button() == Qt.LeftButton:

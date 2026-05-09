@@ -147,11 +147,12 @@ class BaseBrowserTree(QTreeWidget):
 
 class BaseBrowserWidget(QWidget):
     """Base class for browser widgets with single '=' button action menu."""
-    
+
     def __init__(self, main_window: "MainWindow", parent=None):
         super().__init__(parent)
         self.main_window = main_window
-        self._in_command = False
+        self._is_rebuilding = False  # blocks refresh() from reacting to graph_changed
+        self._is_syncing    = False  # blocks re-entrant _sync_to_graph calls
         self._setup_ui()
     
     def _setup_ui(self):
@@ -218,23 +219,40 @@ class BaseBrowserWidget(QWidget):
         tree_widget.customContextMenuRequested.connect(show_context_menu)
     
     def _on_delete(self):
-        """Universal delete for assets and variables."""
-        if self._is_updating: return
         items = self.tree_widget.selectedItems()
-        if not items: return
+        if not items:
+            return
 
-        leaf_items = [it for it in items if it.data(0, self.tree_widget._T) != "folder"]
-        folder_items = [it for it in items if it.data(0, self.tree_widget._T) == "folder"]
+        removed = self._collect_removed(items)
 
-        with self.main_window.scene._undo_manager.transaction("Delete Items"):
-            root = self.tree_widget.invisibleRootItem()
-            for it in leaf_items:
-                (it.parent() or root).removeChild(it)
-            for folder in folder_items:
-                p = folder.parent() or root
-                while folder.childCount(): p.addChild(folder.takeChild(0))
-                p.removeChild(folder)
-            self._sync_to_graph()
+        self._is_rebuilding = True
+        try:
+            with self.main_window.scene._undo_manager.transaction("Delete"):
+                self._remove_items(items)
+                self._sync_to_graph()
+                self._notify_removed(removed)
+        finally:
+            self._is_rebuilding = False
+
+    def _remove_items(self, items):
+        root = self.tree_widget.invisibleRootItem()
+        leaves  = [it for it in items if it.data(0, self.tree_widget._T) != "folder"]
+        folders = [it for it in items if it.data(0, self.tree_widget._T) == "folder"]
+        for it in leaves:
+            (it.parent() or root).removeChild(it)
+        for folder in folders:
+            p = folder.parent() or root
+            while folder.childCount():
+                p.addChild(folder.takeChild(0))
+            p.removeChild(folder)
+
+    def _notify_deleted_data(self, deletion_data):
+        """Hook for subclasses to process collected deletion data."""
+        pass
+
+    def _notify_deleted(self, items):
+        """Optional hook for subclasses to notify about deleted items."""
+        pass
 
     def get_hierarchy(self) -> list[dict]:
         """Serialize tree to dict list."""
@@ -252,12 +270,29 @@ class BaseBrowserWidget(QWidget):
     def _serialize_leaf(self, item: QTreeWidgetItem) -> dict:
         raise NotImplementedError()
 
-    def _sync_to_graph(self):
+    def refresh(self):
+        if self._is_rebuilding or not self.main_window.graph:
+            return
+        self._do_refresh()
+
+    def _do_refresh(self):
+        """Subclass implements this — called only when safe to rebuild."""
         raise NotImplementedError()
 
+    def _sync_to_graph(self):
+        if not self.main_window.graph or self._is_syncing:
+            return
+        self._is_syncing = True
+        try:
+            self._do_sync()
+        finally:
+            self._is_syncing = False
+
     def _on_hierarchy_changed(self):
-        if self._is_updating: return
-        self._sync_to_graph()
+        if self._is_rebuilding or self._is_syncing:
+            return
+        with self.main_window.scene._undo_manager.transaction("Reorder"):
+            self._sync_to_graph()
     
     def _on_context_put_in_folder(self, tree_widget):
         """Handle put in folder from context menu."""
@@ -286,3 +321,11 @@ class BaseBrowserWidget(QWidget):
     def _fill_folder_menu(self, menu: QMenu, folder_item: QTreeWidgetItem):
         """Fill menu with folder-specific actions - to be implemented by subclass."""
         raise NotImplementedError("Subclass must implement _fill_folder_menu")
+
+    def _collect_removed(self, items) -> list:
+        """Subclass returns whatever data _notify_removed needs."""
+        return []
+    
+    def _notify_removed(self, removed: list):
+        """Subclass notifies the scene after graph is consistent."""
+        pass

@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import uuid
 import json
+import copy
 from typing import Any, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
@@ -155,6 +156,7 @@ class BaseNode:
         self.y: float = 0.0
         self.width: float | None = None
         self.height: float | None = None
+        self.label_width: float | None = None
         self.custom_name: str | None = None
         self.inputs: dict[str, Port] = {}
         self.outputs: dict[str, Port] = {}
@@ -371,14 +373,37 @@ class BaseNode:
     def resolve_path(self, path: str) -> str:
         if not path:
             return ""
-        path = os.path.normpath(str(path)).replace("\\", "/")
-        anchor = getattr(self.graph, "output_dir", None) or getattr(self.graph, "project_dir", None)
-        if anchor and os.path.isabs(path):
-            try:
-                return os.path.relpath(path, os.path.normpath(anchor)).replace("\\", "/")
-            except (ValueError, TypeError):
-                pass
-        return path
+
+        norm_path = os.path.normpath(str(path)).replace("\\", "/")
+
+        base_dir = self._graph_base_dir()
+        if base_dir:
+            if os.path.isabs(norm_path):
+                return norm_path
+            return os.path.normpath(os.path.join(base_dir, norm_path)).replace("\\", "/")
+
+        # Fallback: return as-is
+        return norm_path
+
+    def _graph_base_dir(self) -> str | None:
+        """Returns the best available base directory for resolving/relativizing paths."""
+        if not self.graph:
+            return None
+        if self.graph.file_path:
+            return str(self.graph.file_path.parent)
+        return getattr(self.graph, "output_dir", None) or getattr(self.graph, "project_dir", None)
+
+    def _try_make_relative(self, abs_path: str, base_dir: str) -> str:
+        """Return a relative path if abs_path is on the same drive as base_dir, else abs_path."""
+        try:
+            rel = os.path.relpath(abs_path, base_dir).replace("\\", "/")
+            # Reject only if relpath couldn't find a common root (different Windows drives).
+            # Leading '..' traversal is fine — it's valid relative syntax on all platforms.
+            if not os.path.isabs(rel):
+                return rel
+        except ValueError:
+            pass  # Different drives on Windows — keep absolute
+        return abs_path.replace("\\", "/")
 
     def validate_file_input(self, path: str, must_exist: bool = True) -> str:
         resolved = self.resolve_path(path)
@@ -386,6 +411,9 @@ class BaseNode:
             self.fail("File path is empty.")
         if must_exist and not os.path.exists(resolved):
             self.fail(f"File not found: {resolved}")
+        base_dir = self._graph_base_dir()
+        if base_dir:
+            return self._try_make_relative(resolved, base_dir)
         return resolved
 
     def get_dict_value(self, inputs: dict[str, Any], port_name: str, key: str, default: Any = None) -> Any:
@@ -530,6 +558,22 @@ class BaseNode:
         return set()
 
     def to_dict(self) -> dict:
+        values = {}
+        for k, v in self.inputs.items():
+            val = copy.deepcopy(v.value)
+            # Store file paths relative to the graph file's directory if possible
+            if v.port_type == PortType.FILE and val and self.graph and self.graph.file_path:
+                try:
+                    # Get the resolved absolute path of the file
+                    abs_val = os.path.abspath(self.resolve_path(val))
+                    base_dir = self.graph.file_path.parent
+                    
+                    # Compute relative path
+                    val = self._try_make_relative(str(abs_val), str(base_dir))
+                except (ValueError, TypeError):
+                    pass
+            values[k] = val
+
         return {
             "id": self.id,
             "type": self.__class__.__name__,
@@ -539,8 +583,9 @@ class BaseNode:
             "y": self.y,
             "width": getattr(self, 'width', None),
             "height": getattr(self, 'height', None),
+            "label_width": getattr(self, 'label_width', None),
             "folded": self.folded,
-            "values": {k: v.value for k, v in self.inputs.items()},
+            "values": values,
         }
 
     @classmethod
@@ -551,6 +596,7 @@ class BaseNode:
         node.y = data.get("y", 0.0)
         node.width = data.get("width")
         node.height = data.get("height")
+        node.label_width = data.get("label_width")
         node.folded = data.get("folded", False)
         node.title = cls.title
         node.custom_name = data.get("custom_name")
@@ -575,7 +621,6 @@ class BaseNode:
         for name, val in values.items():
             if name in node.inputs:
                 port = node.inputs[name]
-                # Convert boolean values to strings for QComboBox compatibility
                 if port.port_type == PortType.BOOL and isinstance(val, bool):
                     val = "True" if val else "False"
                 port.value = val

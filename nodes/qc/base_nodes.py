@@ -1,10 +1,10 @@
 from core.node import BaseNode
-
+from nodes.qc.shared_categories import QC_CATEGORY
 
 class ModelNameNode(BaseNode):
     """Generates $modelname QC command."""
     title = "Model Name"
-    CATEGORY = "QC"
+    CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
     @classmethod
@@ -25,7 +25,7 @@ class ModelNameNode(BaseNode):
 class CDMaterialsNode(BaseNode):
     """Generates $cdmaterials QC command."""
     title = "CD Materials"
-    CATEGORY = "QC"
+    CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
     @classmethod
@@ -46,7 +46,7 @@ class CDMaterialsNode(BaseNode):
 class QCJoinNode(BaseNode):
     """Joins multiple QC commands into one."""
     title = "QC Join"
-    CATEGORY = "QC"
+    CATEGORY = QC_CATEGORY
     color = "#7a2d2d"
     body_color = "#2b1010"
 
@@ -76,7 +76,7 @@ class QCJoinNode(BaseNode):
 class MakeQCNode(BaseNode):
     """Combines multiple QC commands into one block."""
     title = "Make QC"
-    CATEGORY = "QC"
+    CATEGORY = QC_CATEGORY
     color = "#7a2d2d"
 
     @classmethod

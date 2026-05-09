@@ -23,7 +23,7 @@ from core.history import (create_history_manager,
 from core.recent_nodes import add_recent_node
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
-from nodes.subgraph.subgraph_node import SubgraphNode
+from nodes.subgraph.subgraph_node import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
 from gui.items.node       import NodeItem, ResizeHandle, PortItem
 from gui.items.wire import ConnectionItem
 from gui.dialogs import RenameDialog
@@ -351,13 +351,28 @@ class NodeEditorScene(QGraphicsScene):
             self._emit_graph_changed()
 
     def on_asset_removed(self, path: str) -> None:
-        """Clear any node ports referencing the removed asset."""
+        """Clear any node ports referencing the removed asset and refresh."""
+        changed = False
         for node in self.graph.nodes.values():
             for pname, port in node.inputs.items():
                 if port.value == path:
                     port.value = None
                     self._after_node_mutation(node.id)
-        self._emit_graph_changed()
+                    changed = True
+        if changed:
+            self._emit_graph_changed()
+
+    def on_variable_removed(self, var_name: str) -> None:
+        """Clear any node ports referencing the removed variable and refresh."""
+        changed = False
+        for node in self.graph.nodes.values():
+            for pname, port in node.inputs.items():
+                if port_uses_graph_variables(port) and port.value == var_name:
+                    port.value = ""
+                    self._after_node_mutation(node.id)
+                    changed = True
+        if changed:
+            self._emit_graph_changed()
 
     def _start_rename(self, item: NodeItem) -> None:
         if item.node.locked_title:
@@ -380,8 +395,6 @@ class NodeEditorScene(QGraphicsScene):
                     self._emit_graph_changed()
 
     def _convert_to_subgraph(self, items: list[NodeItem]) -> None:
-        from core.graph import Graph
-        from nodes.subgraph.subgraph_node import SubgraphInputNode, SubgraphOutputNode
         if not items:
             return
 
@@ -390,7 +403,6 @@ class NodeEditorScene(QGraphicsScene):
         )
         if not path:
             return
-        from nodes.subgraph.subgraph_node import SubgraphOutputNode
 
         selected_ids = {it.node.id for it in items}
         avg_pos = QPointF(
@@ -432,7 +444,8 @@ class NodeEditorScene(QGraphicsScene):
                     iface = SubgraphInputNode()
                     pname = _unique(c.dst_port)
                     iface.inputs["port_name"].value = pname
-                    iface.x, iface.y = -300.0, len(ext_to_iface) * 120.0
+                    iface.x = avg_pos.x() - 500.0
+                    iface.y = avg_pos.y() + (len(ext_to_iface) * 120.0)
                     sub_graph.add_node(iface)
                     ext_to_iface[key] = iface
                     parent_in.append((pname, c.src_node, c.src_port))
@@ -443,12 +456,12 @@ class NodeEditorScene(QGraphicsScene):
                     iface = SubgraphOutputNode()
                     pname = _unique(c.src_port)
                     iface.inputs["port_name"].value = pname
-                    iface.x, iface.y = 400.0, len(int_to_iface) * 120.0
+                    iface.x = avg_pos.x() + 500.0
+                    iface.y = avg_pos.y() + (len(int_to_iface) * 120.0)
                     sub_graph.add_node(iface)
                     int_to_iface[key] = iface
                     sub_graph.connect(c.src_node, c.src_port, iface.id, "value")
-                pname = int_to_iface[key].inputs["port_name"].value
-                parent_out.append((pname, c.dst_node, c.dst_port))
+                parent_out.append((int_to_iface[key].inputs["port_name"].value, c.dst_node, c.dst_port))
 
         with self._undo_manager.skip_undo():
             sub_graph.save(path)
@@ -465,10 +478,20 @@ class NodeEditorScene(QGraphicsScene):
             item = NodeItem(proxy_node)
             self._node_items[proxy_node.id] = item
             self.addItem(item)
+            
             for pname, ext_nid, ext_port in parent_in:
                 self.graph.connect(ext_nid, ext_port, proxy.id, pname)
+                conn = self.graph.get_input_connection(proxy.id, pname)
+                if conn:
+                    self._materialise_conn(conn)
+
             for pname, ext_nid, ext_port in parent_out:
                 self.graph.connect(proxy.id, pname, ext_nid, ext_port)
+                conn = self.graph.get_input_connection(ext_nid, ext_port)
+                if conn:
+                    self._materialise_conn(conn)
+
+            self._flush_updates()
 
         self._emit_graph_changed()
         log.debug(f"Converted {len(items)} nodes to subgraph: {path}")
@@ -535,6 +558,9 @@ class NodeEditorScene(QGraphicsScene):
                     sn, dn = id_map.get(c_dict["src_node"]), id_map.get(c_dict["dst_node"])
                     if sn and dn:
                         self.graph.connect(sn, c_dict["src_port"], dn, c_dict["dst_port"])
+                        conn = self.graph.get_input_connection(dn, c_dict["dst_port"])
+                        if conn:
+                            self._materialise_conn(conn)
             
             # Force immediate visual update for dynamic ports after paste
             self._flush_updates()
@@ -910,6 +936,9 @@ def _sync_manager(scene) -> None:
     mgr: HistoryManager | None = getattr(scene, "_undo_manager", None)
     if mgr and not mgr._restoring:
         mgr._debounce.stop()
+        # Optimization: Re-capture only what is necessary, but 
+        # ensure _committed reflects the current state of the graph
+        # after the direct push to avoid a redundant auto-commit diff.
         mgr._committed = StateSnapshot.capture(mgr.graph, mgr._get_ext())
 
 

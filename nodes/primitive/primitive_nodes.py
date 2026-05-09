@@ -238,7 +238,7 @@ class GetItemNode(BaseNode):
 
 class OutputToFileNode(BaseNode):
     title = "Save To File"
-    CATEGORY = "QC"
+    CATEGORY = "General"
     color = "#7a2d2d"
 
     @classmethod
@@ -246,7 +246,7 @@ class OutputToFileNode(BaseNode):
         return {
             "required": {
                 "content": ("*", {}),
-                "out_path": ("STRING", {"default": "output.qc"}),
+                "out_path": ("STRING", {"default": "output.txt"}),
             }
         }
 

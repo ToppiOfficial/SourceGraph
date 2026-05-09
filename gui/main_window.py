@@ -775,13 +775,24 @@ class MainWindow(QMainWindow):
             self.setWindowTitle("SrcGraph")
     
     def _save(self) -> bool:
-        """Save all dirty graphs in the navigation stack."""
+        """Save all dirty graphs in the navigation stack, or current graph if clean."""
+        if self.graph:
+            if self._current_nav and self._current_nav.path:
+                if not self._save_to_path(self._current_nav.path, self.graph):
+                    return False
+            elif self._current_nav:
+                # If no path yet, open Save As dialog
+                if not self._save_as():
+                    return False
+
         success = True
-        
         nodes_to_visit = [self._nav_root] if self._nav_root else []
         while nodes_to_visit:
             node = nodes_to_visit.pop()
             nodes_to_visit.extend(node.children.values())
+            
+            if node == self._current_nav:
+                continue
             
             if node.graph._is_dirty:
                 # Sync execution state before saving
@@ -792,12 +803,12 @@ class MainWindow(QMainWindow):
                 if node.path:
                     if not self._save_to_path(node.path, node.graph):
                         success = False
-                elif self._current_nav and node == self._current_nav:
+                elif node == self._current_nav:
                     if not self._save_as():
                         success = False
         return success
     
-    def _save_to_path(self, path: str, graph: Graph | None = None) -> bool:
+    def _save_to_path(self, path: str, graph: Graph | None = None, save_type: str = "auto") -> bool:
         """Save specific graph to path."""
         target_graph = graph if graph else self.graph
         
@@ -815,6 +826,7 @@ class MainWindow(QMainWindow):
             )
             
             target_graph._is_dirty = False
+            log.debug(f"Successfully {save_type} saved graph to: {path}")
             
             if target_graph == self.graph:
                 if self._current_nav:
@@ -836,7 +848,6 @@ class MainWindow(QMainWindow):
             self._add_to_recent_files(path)
             return True
         except Exception as e:
-            from gui.logger import log
             log.error(f"Failed to save {path}: {e}")
             return False
 

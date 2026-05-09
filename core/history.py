@@ -139,7 +139,9 @@ class HistoryCommand(QUndoCommand):
                 
                 if scene and hasattr(scene, "_rebuild_from_graph"):
                     scene._rebuild_from_graph(selected)
-                mgr._committed = StateSnapshot.capture(self.graph, mgr._get_ext())
+                
+                # Optimization: snapshot IS the new state, no need to re-capture.
+                mgr._committed = snapshot
 
         finally:
             if mgr and not already:
@@ -173,6 +175,10 @@ class HistoryManager:
 
     def attach(self, scene) -> None:
         """Connect to a NodeEditorScene after it is created."""
+        # Disconnect from graph to avoid double notifications when scene is present
+        if self._on_change in self.graph.on_changed:
+            self.graph.on_changed.remove(self._on_change)
+            
         scene.graph_changed.connect(self._on_change)
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
@@ -245,7 +251,7 @@ class HistoryManager:
     def transaction(self, name: str = "Change"):
         """Group mutations into a single named undo entry."""
         self._debounce.stop()
-        before = StateSnapshot.capture(self.graph, self._get_ext()) if self._transaction_depth == 0 else None
+        before = self._committed if self._transaction_depth == 0 else None
         self._transaction_depth += 1
         try:
             yield
@@ -253,7 +259,7 @@ class HistoryManager:
             self._transaction_depth -= 1
             if self._transaction_depth == 0 and before is not None:
                 after = StateSnapshot.capture(self.graph, self._get_ext())
-                if after.to_dict() != before.to_dict():
+                if after != before:
                     self._push_snapshot(before, after, name)
 
     def _on_change(self) -> None:
@@ -272,7 +278,7 @@ class HistoryManager:
         if self._restoring or self._skip_counter > 0:
             return
         current = StateSnapshot.capture(self.graph, self._get_ext())
-        if current.to_dict() != self._committed.to_dict():
+        if current != self._committed:
             desc = self._pending_desc
             self._pending_desc = "Change"
             self._push_snapshot(self._committed, current, desc)
@@ -291,7 +297,9 @@ class HistoryManager:
             self.stack.push(cmd)
         finally:
             self._restoring = False
-        self._committed = StateSnapshot.capture(self.graph, self._get_ext())
+        
+        # Optimization: 'after' already represents the state we just committed.
+        self._committed = after
 
 
 def undoable(manager: HistoryManager, description: str):

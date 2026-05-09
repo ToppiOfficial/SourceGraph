@@ -32,10 +32,22 @@ class ModelFileNode(BaseNode):
 
         self.error_msg = None
         if raw_path:
-            if not os.path.exists(raw_path):
+            resolved_path = self.resolve_path(raw_path)
+            if not os.path.exists(resolved_path):
                 self.error_msg = f"File missing: {os.path.basename(raw_path)}"
-            self.title = os.path.basename(raw_path)
-            self.outputs["file"].label = self.title
+            
+            # Use relative path for display if it resides within the project
+            display_path = raw_path
+            if self.graph and self.graph.file_path:
+                try:
+                    rel = os.path.relpath(resolved_path, self.graph.file_path.parent).replace("\\", "/")
+                    if not rel.startswith(".."):
+                        display_path = rel
+                except (ValueError, TypeError):
+                    pass
+            
+            self.title = os.path.basename(display_path)
+            self.outputs["file"].label = display_path
         else:
             self.title = "Model File"
             self.outputs["file"].label = ""

@@ -1,10 +1,10 @@
 from core.node import BaseNode
-
+from nodes.qc.shared_categories import RENDER_SETTING_CATEGORY
 
 class MaxVerts(BaseNode):
     """Generates $maxverts QC command."""
     title = "Max Verts"
-    CATEGORY = "QC"
+    CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
     @classmethod
@@ -26,7 +26,7 @@ class MaxVerts(BaseNode):
 class MostlyOpaque(BaseNode):
     """Generates $mostlyopaque QC command."""
     title = "Mostly Opaque"
-    CATEGORY = "QC"
+    CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
     @classmethod
@@ -43,7 +43,7 @@ class MostlyOpaque(BaseNode):
 class Opaque(BaseNode):
     """Generates $opaque QC command."""
     title = "Opaque"
-    CATEGORY = "QC"
+    CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
     @classmethod
@@ -60,7 +60,7 @@ class Opaque(BaseNode):
 class AmbientBoost(BaseNode):
     """Generates $ambientboost QC command."""
     title = "Ambient Boost"
-    CATEGORY = "QC"
+    CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
     @classmethod
@@ -77,7 +77,7 @@ class AmbientBoost(BaseNode):
 class StaticProp(BaseNode):
     """Generates $staticprop QC command."""
     title = "Static Prop"
-    CATEGORY = "QC"
+    CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
     @classmethod

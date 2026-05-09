@@ -3,7 +3,7 @@ import os
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsItem
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QKeyEvent, QKeySequence, QPainter
+from PySide6.QtGui import QKeyEvent, QKeySequence, QPainter, QWheelEvent
 
 from gui.panels.base_panel import BasePanel
 from core.node import BaseNode, Port, PortType
@@ -34,6 +34,14 @@ class GraphMapView(SafeGraphicsView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform | QPainter.TextAntialiasing)
+        self.allow_zoom = True
+        self.allow_pan = True
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if not self.allow_zoom and not self.allow_pan:
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Delete or event.matches(QKeySequence.Copy) or \

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTreeWidgetItem,
@@ -122,13 +123,12 @@ class VariablesTreeWidget(BaseBrowserTree):
         item.setData(0, self._N, name)
         item.setText(0, name)
         item.setText(1, _format_value(value))
-        
+
         font = QFont()
         font.setBold(True)
         item.setFont(0, font)
-        
+
         item.setIcon(0, _type_icon(value))
-        # Variables accept no children
         item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
         return item
 
@@ -169,7 +169,7 @@ class VariablesTreeWidget(BaseBrowserTree):
         item = self.itemAt(event.position().toPoint())
         if item and item.data(0, self._T) == "var":
             self.value_edit_requested.emit(item.data(0, self._N), item.text(1))
-            return  # don't expand/collapse on var double-click
+            return
         super().mouseDoubleClickEvent(event)
 
     def _do_rename(self):
@@ -202,13 +202,12 @@ class VariablesTreeWidget(BaseBrowserTree):
 class VariablesBrowserWidget(BaseBrowserWidget):
     def __init__(self, main_window: "MainWindow", parent=None):  # pyright: ignore
         super().__init__(main_window, parent)
-        self._in_command = False
+
+    # -- base contract --------------------------------------------------------
 
     def _setup_tree(self, layout):
-        """Setup variables tree widget."""
         self.tree_widget = VariablesTreeWidget()
         layout.addWidget(self.tree_widget)
-        # Setup context menu from base class
         self._setup_tree_context_menu(self.tree_widget)
 
     def _setup_connections(self):
@@ -217,32 +216,50 @@ class VariablesBrowserWidget(BaseBrowserWidget):
         self.tree_widget.var_rename_requested.connect(self._on_variable_name_changed)
         self.tree_widget.hierarchyChanged.connect(self._on_hierarchy_changed)
 
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+    def _do_refresh(self):
+        layout = self.main_window.graph.variable_layout
+        if layout is not None:
+            self.set_variables(layout)
+        else:
+            self.set_variables(self.main_window.graph.variables)
 
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(4)
-        self.action_btn = QPushButton("=")
-        self.action_btn.setFixedWidth(32)
-        self.action_btn.setStyleSheet(BTN_STYLE)
-        self.action_btn.clicked.connect(self._show_action_menu)
-        toolbar.addWidget(self.action_btn)
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
+    def _do_sync(self):
+        self.main_window.graph.variables = self.get_flat_variables()
+        self.main_window.graph.variable_layout = self.get_hierarchy()
+        for item in self.main_window.scene._node_items.values():
+            item.refresh()
+        self.main_window.scene.update()
+        self.main_window.scene.graph_changed.emit()
 
-        self._setup_tree(layout)
-        self._setup_connections()
+    def _collect_removed(self, items) -> list:
+        names = []
+        def _walk(it):
+            if it.data(0, self.tree_widget._T) == "var":
+                names.append(it.data(0, self.tree_widget._N))
+            else:
+                for i in range(it.childCount()):
+                    _walk(it.child(i))
+        for it in items:
+            _walk(it)
+        return names
+
+    def _notify_removed(self, removed: list):
+        for name in removed:
+            self.main_window.scene.on_variable_removed(name)
+
+    def _serialize_leaf(self, item: QTreeWidgetItem) -> dict:
+        return {"type": "var", "name": item.data(0, self.tree_widget._N), "value": item.text(1)}
+
+    # -- menu -----------------------------------------------------------------
 
     def _fill_menu(self, menu: QMenu, item: QTreeWidgetItem | None = None):
-        """Populate menu with variable actions based on selection."""
         if item is None:
             menu.addAction("Add Variable...", self._on_add)
             menu.addAction("Add Folder...", self._on_add_folder)
             return
 
         typ = item.data(0, self.tree_widget._T)
-        if item == self.root_item or typ == "folder":
+        if typ == "folder":
             menu.addAction("Rename Folder", self.tree_widget._do_rename)
             menu.addSeparator()
             menu.addAction("Delete Folder", self._on_delete)
@@ -251,22 +268,17 @@ class VariablesBrowserWidget(BaseBrowserWidget):
             menu.addAction("Edit Value", self.tree_widget._do_edit_value)
             menu.addSeparator()
             menu.addAction("Delete Variable", self._on_delete)
-    
+
     def _fill_folder_menu(self, menu: QMenu, folder_item: QTreeWidgetItem):
-        """Populate menu with folder-specific actions."""
         menu.addAction("Add Variable...", lambda: self._on_add_to_folder(folder_item))
         menu.addAction("Add Folder...", lambda: self._on_add_subfolder(folder_item))
         menu.addAction("Rename Folder", self.tree_widget._do_rename)
 
     def _show_action_menu(self):
-        """Show action menu from '=' button click."""
-        # Clear selection so _fill_menu adds global actions
         self.tree_widget.clearSelection()
-        
         menu = QMenu(self)
         menu.setStyleSheet(MENU)
         self._fill_menu(menu, None)
-
         button_rect = self.action_btn.geometry()
         menu_pos = self.action_btn.mapToGlobal(button_rect.bottomLeft())
         menu.exec(menu_pos)
@@ -274,38 +286,23 @@ class VariablesBrowserWidget(BaseBrowserWidget):
     # -- public API -----------------------------------------------------------
 
     def get_flat_variables(self) -> dict:
-        """Derived flat dictionary for node logic."""
         res = {}
         for item in self.tree_widget._all_vars():
             name = item.data(0, self.tree_widget._N)
             val_str = item.text(1)
-            if val_str == "<empty>": val_str = ""
+            if val_str == "<empty>":
+                val_str = ""
             res[name] = _parse_value(val_str)
         return res
-
-    def _serialize_leaf(self, item: QTreeWidgetItem) -> dict:
-        return {"type": "var", "name": item.data(0, self.tree_widget._N), "value": item.text(1)}
 
     def get_variables(self) -> dict:
         return self.get_flat_variables()
 
-    def refresh(self):
-        """Rebuild from graph state (undo/redo)."""
-        if self._in_command or not self.main_window.graph:
-            return
-        
-        # Prioritize layout; fallback to flat variables ONLY if layout is missing
-        layout = self.main_window.graph.variable_layout
-        if layout is not None:
-            self.set_variables(layout)
-        else:
-            self.set_variables(self.main_window.graph.variables)
-
     def set_variables(self, data: list | dict):
-        self._in_command = True
+        self._is_rebuilding = True
         try:
             self.tree_widget.clear()
-                
+
             def _apply(items, parent=None):
                 for d in items:
                     if d.get("type") == "folder":
@@ -314,7 +311,7 @@ class VariablesBrowserWidget(BaseBrowserWidget):
                         _apply(d.get("children", []), folder)
                     else:
                         self.tree_widget.add_variable(d["name"], d.get("value", ""), parent)
-            
+
             if isinstance(data, dict):
                 for name, val in data.items():
                     display_val = str(val).lower() if isinstance(val, bool) else str(val)
@@ -323,110 +320,57 @@ class VariablesBrowserWidget(BaseBrowserWidget):
                 _apply(data, None)
             self.tree_widget._refresh_folder_spans()
         finally:
-            self._in_command = False
+            self._is_rebuilding = False
 
     # -- handlers -------------------------------------------------------------
 
     def _on_add(self):
-        if self._in_command:
+        if self._is_rebuilding:
             return
         with self.main_window.scene._undo_manager.transaction("Add Variable"):
             name = _unique_name(self.tree_widget, "new_var")
-
-            # Default to top level
-            parent = None
-            sel = self.tree_widget.selectedItems()
-            if sel:
-                s = sel[0]
-                if s.data(0, self.tree_widget._T) == "folder":
-                    parent = s
-                elif s.parent() and s.parent().data(0, self.tree_widget._T) == "folder":
-                    parent = s.parent()
-
-            self._in_command = True
+            parent = self._selected_parent()
             self.tree_widget.add_variable(name, "", parent)
-            self._in_command = False
             self._sync_to_graph()
 
     def _on_add_variable_with_name(self, name: str):
-        """Add a variable with a specific name from context menu."""
-        if self._in_command:
+        if self._is_rebuilding:
             return
         with self.main_window.scene._undo_manager.transaction("Add Variable"):
-            # Ensure name is unique
             final_name = _unique_name(self.tree_widget, name)
-
-            # Default to top level
-            parent = None
-            sel = self.tree_widget.selectedItems()
-            if sel:
-                s = sel[0]
-                if s.data(0, self.tree_widget._T) == "folder":
-                    parent = s
-                elif s.parent() and s.parent().data(0, self.tree_widget._T) == "folder":
-                    parent = s.parent()
-
-            self._in_command = True
+            parent = self._selected_parent()
             self.tree_widget.add_variable(final_name, "", parent)
-            self._in_command = False
-
             self._sync_to_graph()
 
     def _on_add_folder_with_name(self, name: str):
-        """Add a folder with a specific name from context menu."""
-        if self._in_command:
+        if self._is_rebuilding:
             return
         with self.main_window.scene._undo_manager.transaction("Add Folder"):
-            # Ensure name is unique within siblings
             final_name = _unique_name(self.tree_widget, name)
-            
-            # Default to top level
-            parent = None
-            sel = self.tree_widget.selectedItems()
-            if sel:
-                s = sel[0]
-                if s.data(0, self.tree_widget._T) == "folder":
-                    parent = s
-                elif s.parent() and s.parent().data(0, self.tree_widget._T) == "folder":
-                    parent = s.parent()
-            
-            self._in_command = True
+            parent = self._selected_parent()
             self.tree_widget.add_folder(final_name, parent)
-            self._in_command = False
-            
             self._sync_to_graph()
 
     def _on_add_to_folder(self, folder_item):
-        """Add a variable directly to a specific folder."""
-        if self._in_command:
+        if self._is_rebuilding:
             return
         with self.main_window.scene._undo_manager.transaction("Add Variable to Folder"):
             name = _unique_name(self.tree_widget, "new_var")
-            
-            self._in_command = True
             self.tree_widget.add_variable(name, "", folder_item)
-            self._in_command = False
             self._sync_to_graph()
-    
+
     def _on_add_subfolder(self, parent_folder):
-        """Add a subfolder to a specific folder."""
         dlg = RenameDialog("New Folder", "New Folder", "Folder name:", self)
         if dlg.exec() != QDialog.Accepted:
             return
         name = dlg.get_name().strip()
         if name:
             with self.main_window.scene._undo_manager.transaction("Add Subfolder"):
-                # Ensure name is unique within siblings
                 final_name = _unique_name(self.tree_widget, name)
-                
-                self._in_command = True
                 self.tree_widget.add_folder(final_name, parent_folder)
-                self._in_command = False
-                
                 self._sync_to_graph()
-    
+
     def _on_add_folder(self):
-        """Add a folder at the top level."""
         dlg = RenameDialog("New Folder", "New Folder", "Folder name:", self)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -436,13 +380,8 @@ class VariablesBrowserWidget(BaseBrowserWidget):
                 self.tree_widget.add_folder(name, None)
                 self._sync_to_graph()
 
-    def _on_hierarchy_changed(self):
-        if self._in_command or not self.main_window or not self.main_window.scene: return
-        with self.main_window.scene._undo_manager.transaction("Reorder Variables"):
-            self._sync_to_graph()
-
     def _on_variable_name_changed(self, old_name: str, new_name: str):
-        if self._in_command or not new_name.strip():
+        if self._is_rebuilding or not new_name.strip():
             return
         with self.main_window.scene._undo_manager.transaction("Rename Variable"):
             final_name = _unique_name(self.tree_widget, new_name, exclude=old_name)
@@ -451,12 +390,11 @@ class VariablesBrowserWidget(BaseBrowserWidget):
                     it.setData(0, self.tree_widget._N, final_name)
                     it.setText(0, final_name)
                     break
-            # graph.variables is updated during sync
             self._propagate_variable_rename(old_name, final_name)
             self._sync_to_graph()
 
     def _on_edit_value(self, var_name: str, current_value: str):
-        if self._in_command:
+        if self._is_rebuilding:
             return
         dlg = RenameDialog("Edit Variable Value", current_value, "Enter new value:", self)
         if dlg.exec() != QDialog.Accepted:
@@ -468,23 +406,30 @@ class VariablesBrowserWidget(BaseBrowserWidget):
             self.tree_widget.update_variable(var_name, new_value)
             self._sync_to_graph()
 
+    def _put_selected_in_folder(self, tree_widget, selected_items, folder_name):
+        with self.main_window.scene._undo_manager.transaction("Put Items in Folder"):
+            folder = tree_widget.add_folder(folder_name)
+            root = tree_widget.invisibleRootItem()
+            for item in selected_items:
+                if item.data(0, tree_widget._T) in ["var", "folder"]:
+                    parent = item.parent() or root
+                    parent.removeChild(item)
+                    folder.addChild(item)
+            self._sync_to_graph()
+
     # -- internals ------------------------------------------------------------
 
-    def _sync_to_graph(self):
-        if not self.main_window.graph or self._in_command:
-            return
-            
-        self._in_command = True
-        try:
-            self.main_window.graph.variables = self.get_flat_variables()
-            self.main_window.graph.variable_layout = self.get_hierarchy()
-            
-            for item in self.main_window.scene._node_items.values():
-                item.refresh()
-            self.main_window.scene.update()
-            self.main_window.scene.graph_changed.emit()
-        finally:
-            self._in_command = False
+    def _selected_parent(self) -> QTreeWidgetItem | None:
+        """Return the folder to add into based on current selection."""
+        sel = self.tree_widget.selectedItems()
+        if not sel:
+            return None
+        s = sel[0]
+        if s.data(0, self.tree_widget._T) == "folder":
+            return s
+        if s.parent() and s.parent().data(0, self.tree_widget._T) == "folder":
+            return s.parent()
+        return None
 
     def _propagate_variable_rename(self, from_name: str, to_name: str) -> None:
         scene = self.main_window.scene
@@ -501,37 +446,8 @@ class VariablesBrowserWidget(BaseBrowserWidget):
             if touched and scene:
                 scene._after_node_mutation(node.id)
 
-    def _put_selected_in_folder(self, tree_widget, selected_items, folder_name):
-        """Put selected items in a new folder."""
-        with self.main_window.scene._undo_manager.transaction("Put Items in Folder"):
-            folder = tree_widget.add_folder(folder_name)
-            root = tree_widget.invisibleRootItem()
-            for item in selected_items:
-                if item.data(0, tree_widget._T) in ["var", "folder"]:
-                    parent = item.parent() or root
-                    parent.removeChild(item)
-                    folder.addChild(item)
-            self._sync_to_graph()
-
 
 # -- helpers ------------------------------------------------------------------
-
-def _parse_value(val_str: str) -> Any:
-    """Parse string value into appropriate Python type."""
-    if val_str == "<empty>":
-        return ""
-    try:
-        if val_str.lower() in ("true", "false"):
-            return val_str.lower() == "true"
-        elif "." in val_str:
-            return float(val_str)
-        elif val_str.isdigit() or (val_str.startswith("-") and val_str[1:].isdigit()):
-            return int(val_str)
-        else:
-            return val_str
-    except Exception:
-        return val_str
-
 
 def _unique_name(tree: VariablesTreeWidget, base: str, exclude: str = "") -> str:
     existing = set(tree.get_variable_names())
@@ -550,7 +466,7 @@ class VariablesModularPanel(BasePanel):
     ID            = "VariablesDock"
     TITLE         = "Variables"
     DEFAULT_AREA  = Qt.LeftDockWidgetArea
-    COLOR         = "#63c2df"  # Accent color for Variables panel
+    COLOR         = "#63c2df"
 
     def __init__(self, main_window) -> None:
         super().__init__(main_window)
@@ -568,7 +484,7 @@ class VariablesModularPanel(BasePanel):
         if self._active_scene:
             try: self._active_scene.graph_changed.disconnect(self._widget.refresh)
             except (TypeError, RuntimeError): pass
-            
+
         self._active_scene = scene
         scene.graph_changed.connect(self._widget.refresh)
         self._widget.refresh()
