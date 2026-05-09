@@ -18,8 +18,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from core.graph import Graph, Connection
 from core.node import PortType, port_uses_graph_variables
-from core.history import (create_history_manager,
-                           HistoryManager, StateSnapshot)
+from core.history import create_history_manager, HistoryManager
 from core.recent_nodes import add_recent_node
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
@@ -30,7 +29,7 @@ from gui.dialogs import RenameDialog
 from gui.theme import *
 from gui.logger import log
 from gui.widgets.basic_shapes import ShapeDrawer
-from gui.menu.search_dialog import NodeSearchDialog
+from gui.menu.node_search_dialog import NodeSearchDialog
 
 
 class MinimapWidget(QWidget):
@@ -231,8 +230,8 @@ class NotificationPopup(QLabel):
     def position_in_parent(self):
         if not self.parentWidget(): return
         parent_rect = self.parentWidget().rect()
-        x = 20
-        y = parent_rect.height() - self.height() - 20
+        x = parent_rect.width() - self.width() - 20
+        y = 20
         self.move(x, y)
 
 
@@ -922,45 +921,40 @@ class NodeEditorScene(QGraphicsScene):
         super().keyPressEvent(event)
 
 
-# ---------------------------------------------------------------------------
-# Undo commands — direct push() path
-#
-# These commands are pushed via undo_stack.push() (Qt path) rather than
-# through HistoryManager._push_snapshot().  _sync_manager() keeps
-# HistoryManager._committed in sync so the debounce auto-commit does not
-# create a duplicate entry for the same change.
-# ---------------------------------------------------------------------------
-
-def _sync_manager(scene) -> None:
-    """Update the history manager's committed snapshot after a direct push."""
-    mgr: HistoryManager | None = getattr(scene, "_undo_manager", None)
-    if mgr and not mgr._restoring:
-        mgr._debounce.stop()
-        # Optimization: Re-capture only what is necessary, but 
-        # ensure _committed reflects the current state of the graph
-        # after the direct push to avoid a redundant auto-commit diff.
-        mgr._committed = StateSnapshot.capture(mgr.graph, mgr._get_ext())
-
 
 class ResizeNodeCommand(QUndoCommand):
     def __init__(self, item: NodeItem, old_w: float, old_h: float, new_w: float, new_h: float):
         super().__init__(f"Resize Node: {item.node.title}")
-        self.item  = item
+        self._scene   = item.scene()
+        self._node_id = item.node.id
         self.old_w = old_w
         self.old_h = old_h
         self.new_w = new_w
         self.new_h = new_h
 
+    def _get_item(self):
+        return self._scene._node_items.get(self._node_id) if self._scene else None
+
     def undo(self):
-        self.item.resize_to(self.old_w, self.old_h)
-        self.item.scene()._emit_graph_changed()
-        _sync_manager(self.item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        item.resize_to(self.old_w, self.old_h)
+        sc = item.scene()
+        if sc:
+            sc._emit_graph_changed()
+            sc._undo_manager.sync()
 
     def redo(self):
-        self.item.resize_to(self.new_w, self.new_h)
-        self.item.scene()._emit_graph_changed()
-        log.debug(f"Resized node '{self.item.node.title}' to {self.new_w:.1f}x{self.new_h:.1f}")
-        _sync_manager(self.item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        item.resize_to(self.new_w, self.new_h)
+        sc = item.scene()
+        if sc:
+            sc._emit_graph_changed()
+            sc._undo_manager.sync()
+        log.debug(f"Resized node to {self.new_w:.1f}x{self.new_h:.1f}")
 
 
 class PropertyCommand(QUndoCommand):
@@ -968,23 +962,37 @@ class PropertyCommand(QUndoCommand):
 
     def __init__(self, node_item: NodeItem, port_name: str, old_val, new_val):
         super().__init__(f"Change {port_name}")
-        self.node_item = node_item
+        self._scene   = node_item.scene()
+        self._node_id = node_item.node.id
         self.port_name = port_name
         self.old_val   = old_val
         self.new_val   = new_val
 
+    def _get_item(self):
+        return self._scene._node_items.get(self._node_id) if self._scene else None
+
     def undo(self):
-        self._apply(self.old_val)
-        _sync_manager(self.node_item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        self._apply(item, self.old_val)
+        sc = item.scene()
+        if sc:
+            sc._undo_manager.sync()
 
     def redo(self):
-        self._apply(self.new_val)
-        _sync_manager(self.node_item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        self._apply(item, self.new_val)
+        sc = item.scene()
+        if sc:
+            sc._undo_manager.sync()
 
-    def _apply(self, val) -> None:
+    def _apply(self, node_item, val) -> None:
         from gui.items.node import _coerce
 
-        port = self.node_item.node.inputs.get(self.port_name)
+        port = node_item.node.inputs.get(self.port_name)
 
         if port and port.port_type == PortType.FLOAT:
             try:
@@ -996,57 +1004,64 @@ class PropertyCommand(QUndoCommand):
 
         if port:
             _coerce(port, val_str)
-            log.debug(f"Property update: {self.node_item.node.title}.{self.port_name} = '{val_str}'")
 
-        scene = self.node_item.scene()
+        scene = node_item.scene()
         if scene and port:
-            scene._after_node_mutation(self.node_item.node.id)
+            scene._after_node_mutation(node_item.node.id)
             scene._emit_graph_changed()
 
 
 class FoldCommand(QUndoCommand):
     """Undo/redo node fold/unfold operations."""
-    
+
     def __init__(self, node_item: 'NodeItem', old_folded: bool, new_folded: bool):
         super().__init__(f"{'Fold' if new_folded else 'Unfold'} Node: {node_item.node.title}")
-        self.node_item = node_item
+        self._scene   = node_item.scene()
+        self._node_id = node_item.node.id
         self.old_folded = old_folded
         self.new_folded = new_folded
         self.old_height = node_item._unfolded_height
 
+    def _get_item(self):
+        return self._scene._node_items.get(self._node_id) if self._scene else None
+
     def undo(self):
-        self._apply(self.old_folded)
-        _sync_manager(self.node_item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        self._apply(item, self.old_folded)
+        sc = item.scene()
+        if sc:
+            sc._undo_manager.sync()
 
     def redo(self):
-        self._apply(self.new_folded)
-        log.debug(f"{'Folded' if self.new_folded else 'Unfolded'} node '{self.node_item.node.title}'")
-        _sync_manager(self.node_item.scene())
+        item = self._get_item()
+        if item is None:
+            return
+        self._apply(item, self.new_folded)
+        sc = item.scene()
+        if sc:
+            sc._undo_manager.sync()
 
-    def _apply(self, folded: bool) -> None:
-        # Store current height if about to fold
-        if not self.node_item.node.folded and folded:
-            self.node_item._unfolded_height = self.node_item._h
-        
-        # Apply the fold state
-        self.node_item.node.folded = folded
-        self.node_item.refresh_ports()
-        
-        # Restore saved height if unfolding
+    def _apply(self, node_item, folded: bool) -> None:
+        if not node_item.node.folded and folded:
+            node_item._unfolded_height = node_item._h
+
+        node_item.node.folded = folded
+        node_item.refresh_ports()
+
         if not folded and self.old_height is not None:
-            self.node_item.prepareGeometryChange()
-            self.node_item._h = self.old_height
-            self.node_item.node.height = self.old_height
-            self.node_item.handle.setPos(self.node_item._w, self.node_item._h)
-            self.node_item._unfolded_height = None
-        
-        # Update handle visibility
-        self.node_item.handle.setVisible(not folded)
-        
-        # Refresh connections and emit change
-        scene = self.node_item.scene()
+            node_item.prepareGeometryChange()
+            node_item._h = self.old_height
+            node_item.node.height = self.old_height
+            node_item.handle.setPos(node_item._w, node_item._h)
+            node_item._unfolded_height = None
+
+        node_item.handle.setVisible(not folded)
+
+        scene = node_item.scene()
         if scene:
-            scene.refresh_connections(self.node_item)
+            scene.refresh_connections(node_item)
             scene._emit_graph_changed()
 
 #  View 
@@ -1137,7 +1152,6 @@ class NodeEditorView(SafeGraphicsView):
 
         items_to_process = []
 
-        # 1. Try to parse structured data from internal drags
         try:
             data = json.loads(text)
             if isinstance(data, dict):
@@ -1148,7 +1162,6 @@ class NodeEditorView(SafeGraphicsView):
                     for n in data.get("names", []):
                         items_to_process.append(("variable", n))
         except (json.JSONDecodeError, TypeError):
-            # 2. Fallback to legacy string format (external files or old logic)
             if text.startswith("variable:"):
                 items_to_process.append(("variable", text.split(":", 1)[1]))
             else:
@@ -1187,8 +1200,8 @@ class NodeEditorView(SafeGraphicsView):
                         cls = NODE_CLASS_MAPPINGS.get("SubgraphNode")
                         assign_key = "graph_path"
                     else:
-                        cls = NODE_CLASS_MAPPINGS.get("ModelFileNode")
-                        assign_key = None
+                        cls = NODE_CLASS_MAPPINGS.get("FileLoader")
+                        assign_key = "asset"
 
                     if cls:
                         node = cls()
@@ -1486,7 +1499,7 @@ class NodeEditorView(SafeGraphicsView):
             menu.addSeparator()
             add_exec_act = menu.addAction("Add to Execution")
             
-            is_loader = (item.node.__class__.__name__ == "ModelFileNode" or
+            is_loader = (item.node.__class__.__name__ == "FileLoader" or
                         any(k in item.node.outputs or k in item.node.inputs 
                             for k in ("file", "path", "asset")))
             

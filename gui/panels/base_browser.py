@@ -57,7 +57,6 @@ class BaseBrowserTree(QTreeWidget):
 
             indent = self.indentation()
 
-            # 1. Draw vertical lines for ancestors (continuity)
             ancestor = index.parent()
             for i in range(depth - 1, -1, -1):
                 if ancestor.sibling(ancestor.row() + 1, 0).isValid():
@@ -65,7 +64,6 @@ class BaseBrowserTree(QTreeWidget):
                     painter.drawLine(lx, rect.top(), lx, rect.bottom())
                 ancestor = ancestor.parent()
 
-            # 2. Draw lines for the current item level
             cx = rect.left() + (depth * indent) + (indent // 2)
             cy = rect.top() + (rect.height() // 2)
             
@@ -77,7 +75,6 @@ class BaseBrowserTree(QTreeWidget):
             painter.drawLine(cx, cy, cx + (indent // 2), cy)
             painter.restore()
 
-        # 3. Draw the expansion triangle on top
         if not self.model().hasChildren(index):
             return
         indent = self.indentation()

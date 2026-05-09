@@ -2,14 +2,15 @@ from __future__ import annotations
 import os
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsItem
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtGui import QKeyEvent, QKeySequence, QPainter, QWheelEvent
 
 from gui.panels.base_panel import BasePanel
 from core.node import BaseNode, Port, PortType
 from core.graph import Graph
 from gui.node_editor import NodeEditorScene, NodeEditorView
-from gui.theme import ACCENT, BG_RAISED
+from gui.theme import ACCENT, BG_RAISED, COLOR_ERROR
+from gui.logger import log
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from gui.items.node import NodeItem
 from gui.items.wire import ConnectionItem
@@ -87,7 +88,12 @@ class GraphMapPanel(BasePanel):
         return super().eventFilter(watched, event)
 
     def setup(self) -> None:
+        self.visibilityChanged.connect(self._on_visibility_changed)
         self.refresh()
+
+    def _on_visibility_changed(self, visible: bool):
+        if visible:
+            QTimer.singleShot(50, self._fit_view)
 
     def update_context(self, graph, scene) -> None:
         if self._active_scene:
@@ -119,6 +125,30 @@ class GraphMapPanel(BasePanel):
         if not rect.isEmpty():
             self.map_view.fitInView(rect, Qt.KeepAspectRatio)
 
+    def update_execution_errors(self) -> None:
+        """Mark nav nodes whose subgraph had an execution error, then refresh."""
+        mw = self.main_window
+        graph = getattr(mw, 'graph', None)
+        current_nav = getattr(mw, '_current_nav', None)
+        if not graph or not current_nav:
+            return
+        for node in graph.nodes.values():
+            if node.__class__.__name__ != "SubgraphNode":
+                continue
+            if not node.error_msg:
+                continue
+            path = node.inputs.get("graph_path", {}).value if "graph_path" in node.inputs else ""
+            if not path:
+                continue
+            if not os.path.isabs(path) and graph.project_dir:
+                path = os.path.normpath(os.path.join(graph.project_dir, path))
+            abs_path = os.path.abspath(path)
+            child_nav = current_nav.children.get(abs_path)
+            if child_nav:
+                child_nav.exec_error = True
+                log.error(f"[GraphMap] Subgraph execution error in: {os.path.basename(abs_path)}")
+        self.refresh()
+
     def refresh(self) -> None:
         if not self.main_window._nav_root or not self.main_window._current_nav:
             self.map_scene.clear()
@@ -133,7 +163,14 @@ class GraphMapPanel(BasePanel):
             def _build(nav, x, y):
                 gn = NavGraphNode(nav)
                 gn.x, gn.y = x, y
-                gn.color = ACCENT if nav == self.main_window._current_nav else BG_RAISED
+                if nav == self.main_window._current_nav:
+                    gn.color = ACCENT
+                elif getattr(nav, 'exec_error', False):
+                    gn.color = COLOR_ERROR
+                elif getattr(nav, 'has_cycle', False):
+                    gn.color = COLOR_ERROR
+                else:
+                    gn.color = BG_RAISED
                 self.map_graph.add_node(gn)
                 node_map[nav] = gn
                 if not nav.children: return 120
@@ -155,5 +192,5 @@ class GraphMapPanel(BasePanel):
             if isinstance(item, ConnectionItem): item.setFlag(QGraphicsItem.ItemIsSelectable, False)
             if isinstance(item, NodeItem) and getattr(item.node, "nav_node", None) == self.main_window._current_nav:
                 item.setSelected(True)
-        
-        self._fit_view()
+
+        QTimer.singleShot(50, self._fit_view)

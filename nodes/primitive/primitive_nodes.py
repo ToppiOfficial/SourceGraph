@@ -147,21 +147,19 @@ class PrintNode(BaseNode):
     title = "Print"
     CATEGORY = "Primitives"
     color = "#6272a4"
+    default_width = 200
 
     def __init__(self):
         super().__init__()
         self._output_buffer = []
-        self._max_lines = 10
+        self._max_lines = 512
         self._display_widget = None
-        
-        self.configure_custom_widget(height=30, below_ports=True, full_width=True)
-        self.width = 200
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "value": ("*", {"visible": True, "allow_connection": True}),
+                "value": ("*", {"visible": True, "allow_connection": True, "below_ports": True, "row_height": 80, "row_stretch": True}),
             },
         }
 
@@ -179,13 +177,17 @@ class PrintNode(BaseNode):
     
     def sync_presentation(self) -> None:
         """Override to trigger GUI updates when output text changes."""
-        if self._display_widget: self._display_widget.setPlainText(self.output_text)
+        if self._display_widget:
+            try:
+                self._display_widget.setPlainText(self.output_text)
+            except RuntimeError:
+                self._display_widget = None
     
     def _register_gui_builders(self) -> None:
         """Register GUI builders for this node using the self-registration system."""
         super()._register_gui_builders()
         
-        def create_print_display(port, parent=None):
+        def create_print_display(port):
             from PySide6.QtWidgets import QTextEdit
             
             display = QTextEdit()

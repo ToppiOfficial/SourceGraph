@@ -220,6 +220,8 @@ __marimo__/
 config/
 crash/
 .vscode
+.claude
+claude.md
 _testcases/
 workspace/autosave.json
 config/recent_nodes.json

@@ -1,9 +1,22 @@
 import os
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget, 
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget,
                                QTreeWidgetItem, QPushButton, QFileDialog, QLabel, QHeaderView)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from gui.theme import *
+from gui.theme import (
+    BTN_STYLE, TREE_STYLE, BG_MED, BG_DARK, FG_DIM, FG_MAIN, BORDER_DARK,
+    COLOR_VALID, COLOR_INVALID,
+)
+
+_DIALOG_STYLE = f"""
+QDialog {{
+    background: {BG_MED};
+    color: {FG_MAIN};
+    border: 1px solid {BORDER_DARK};
+}}
+QLabel {{ color: {FG_DIM}; font-size: 12px; }}
+"""
+
 
 class AssetFinderDialog(QDialog):
     """Dialog to help users relocate missing assets in bulk or individually."""
@@ -17,28 +30,33 @@ class AssetFinderDialog(QDialog):
         self._refresh_list()
 
     def _setup_ui(self):
+        self.setStyleSheet(_DIALOG_STYLE)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         self.info_label = QLabel()
-        self.info_label.setStyleSheet(f"color: {FG_DIM}; font-size: 13px;")
         layout.addWidget(self.info_label)
 
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["Original Path", "Resolved Path"])
         self.tree.setAlternatingRowColors(True)
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.tree.setStyleSheet(TREE_STYLE)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.tree)
 
         btn_row = QHBoxLayout()
         self.search_btn = QPushButton("Search Directory...")
-        self.locate_btn = QPushButton("Locate File...")
-        self.apply_btn = QPushButton("Apply")
+        self.locate_btn = QPushButton("Locate Selected...")
+        self.apply_btn  = QPushButton("Apply")
         self.cancel_btn = QPushButton("Cancel")
-        
+
+        for btn in (self.search_btn, self.locate_btn, self.apply_btn, self.cancel_btn):
+            btn.setStyleSheet(BTN_STYLE)
+
         btn_row.addWidget(self.search_btn)
         btn_row.addWidget(self.locate_btn)
         btn_row.addStretch()
@@ -62,24 +80,28 @@ class AssetFinderDialog(QDialog):
             else:
                 item.setForeground(1, QColor(COLOR_INVALID))
             self.tree.addTopLevelItem(item)
-        
+
         remaining = len(self.missing_paths) - found
-        self.info_label.setText(f"Missing: {len(self.missing_paths)}  |  Found: {found}  |  Remaining: {remaining}")
+        self.info_label.setText(
+            f"Missing: {len(self.missing_paths)}  |  Found: {found}  |  Remaining: {remaining}"
+            + ("  —  Double-click a row to locate it manually." if remaining else "")
+        )
         self.apply_btn.setEnabled(found > 0)
 
     def _on_search_dir(self):
-        directory = QFileDialog.getExistingDirectory(self, "Search for Assets")
+        directory = QFileDialog.getExistingDirectory(self, "Search for Assets in Directory")
         if not directory:
             return
-        
+
         local_files = {}
         for root, _, files in os.walk(directory):
             for f in files:
                 if f.lower() not in local_files:
                     local_files[f.lower()] = os.path.join(root, f).replace("\\", "/")
-        
+
         for orig in self.missing_paths:
-            if self.resolved_paths[orig]: continue
+            if self.resolved_paths[orig]:
+                continue
             fname = os.path.basename(orig).lower()
             if fname in local_files:
                 self.resolved_paths[orig] = local_files[fname]
@@ -87,9 +109,19 @@ class AssetFinderDialog(QDialog):
 
     def _on_locate(self):
         curr = self.tree.currentItem()
-        if not curr: return
-        orig, fname = curr.text(0), os.path.basename(curr.text(0))
-        path, _ = QFileDialog.getOpenFileName(self, f"Locate {fname}", "", f"{fname} ({fname});;All Files (*)")
+        if not curr:
+            return
+        self._locate_item(curr)
+
+    def _on_item_double_clicked(self, item: QTreeWidgetItem, _column: int):
+        self._locate_item(item)
+
+    def _locate_item(self, item: QTreeWidgetItem):
+        orig  = item.text(0)
+        fname = os.path.basename(orig)
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"Locate {fname}", "", f"{fname} ({fname});;All Files (*)"
+        )
         if path:
             self.resolved_paths[orig] = path.replace("\\", "/")
             self._refresh_list()

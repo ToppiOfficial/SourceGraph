@@ -21,7 +21,7 @@ MIN_W     = 120
 LBL_W_MIN = 60   # minimum px reserved for a port label
 
 # Input types that get an inline editable widget when unconnected.
-_EDITABLE = {PortType.ANY, PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM}
+_EDITABLE = {PortType.ANY, PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM, PortType.FILE}
 
 def _elide(s: str, n: int = 25) -> str:
     return s if len(s) <= n else s[:n - 1] + "…"
@@ -143,7 +143,10 @@ class ResizeHandle(QGraphicsItem):
 
     def shape(self):
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        path.moveTo(0, 0)
+        path.lineTo(-10, 0)
+        path.lineTo(0, -10)
+        path.closeSubpath()
         return path
 
     def paint(self, painter, option, widget=None):
@@ -213,7 +216,8 @@ class NodeItem(QGraphicsItem):
         self.setAcceptDrops(True)
 
         self._is_resizing = False
-        self._w = node.width if node.width is not None else DEFAULT_W
+        node_default_w = getattr(node, 'default_width', None) or DEFAULT_W
+        self._w = node.width if node.width is not None else node_default_w
 
         # For folded nodes, always calculate appropriate folded height
         # Ignore saved height as it might be from unfolded state
@@ -226,6 +230,7 @@ class NodeItem(QGraphicsItem):
         self._unfolded_height: float | None = None
 
         self._build()
+        self._update_ports()
         self._layout_rows = self.layout_row_signature()
         self.setPos(node.x, node.y)
 
@@ -291,16 +296,24 @@ class NodeItem(QGraphicsItem):
         for p in self.node.outputs.values():
             if p.visible or getattr(p, "label", None):
                 h += ROW_H
+        below_extra = 0
         for p in self.node.inputs.values():
             is_editable = p.port_type in _EDITABLE and p.editable
             has_custom = self.node.has_gui_builder(p.name)
-            if p.visible or is_editable or has_custom:
+            full_row = getattr(p, 'full_row', False)
+            below_flag = getattr(p, 'below_ports', False)
+            port_rh = getattr(p, 'row_height', None) or ROW_H
+            if not (p.visible or is_editable or has_custom or full_row):
+                continue
+            if full_row:
+                h += port_rh
+            elif below_flag:
                 h += ROW_H
-        
-        # Add extra height for custom widgets that need more space
-        if hasattr(self.node, '_custom_widget_height') and self.node._custom_widget_height > 0:
-            h += self.node._custom_widget_height
-        
+                if is_editable or has_custom:
+                    below_extra += port_rh
+            else:
+                h += ROW_H
+        h += below_extra
         return max(h, TITLE_H + ROW_H) + PAD
 
     def layout_row_signature(self) -> tuple[tuple[str, str], ...]:
@@ -310,7 +323,7 @@ class NodeItem(QGraphicsItem):
             if p.visible:
                 rows.append(("o", name))
         for name, p in self.node.inputs.items():
-            if p.visible or (p.port_type in _EDITABLE and p.editable) or self.node.has_gui_builder(name):
+            if p.visible or (p.port_type in _EDITABLE and p.editable) or self.node.has_gui_builder(name) or getattr(p, 'full_row', False):
                 rows.append(("i", name))
         return tuple(rows)
 
@@ -356,104 +369,93 @@ class NodeItem(QGraphicsItem):
                 row_idx += 1
             self._output_port_names.append(name)
 
-        # Inputs (below outputs)
+        # Inputs — pass 1: normal rows and full_row ports
+        below_ports_queue: list[tuple[str, "Port"]] = []
         current_y = TITLE_H + row_idx * ROW_H
         for name, port in self.node.inputs.items():
             is_editable = port.port_type in _EDITABLE and port.editable
-            if not port.visible and not is_editable:
+            has_custom = self.node.has_gui_builder(name)
+            full_row = getattr(port, 'full_row', False)
+            below_flag = getattr(port, 'below_ports', False)
+            port_rh = getattr(port, 'row_height', None) or ROW_H
+
+            if not port.visible and not is_editable and not has_custom and not full_row:
                 continue
 
-            # Create port item only if visible and allow_connection is True
-            if port.visible and port.allow_connection:
-                pi = PortItem(port, self)
-                pi.setPos(0, current_y + ROW_H / 2)
-                self._port_items[name] = pi
-
-            has_custom = self.node.has_gui_builder(name)
-            if is_editable or has_custom:
+            if full_row:
+                # No port circle; widget spans full width
                 proxy = self._build_input_widget(name, port, current_y)
                 if proxy:
                     self._proxies[name] = proxy
+                current_y += port_rh
+            elif below_flag:
+                # Port circle in normal row; widget placed in pass 2
+                if port.visible and port.allow_connection:
+                    pi = PortItem(port, self)
+                    pi.setPos(0, current_y + ROW_H / 2)
+                    self._port_items[name] = pi
+                if is_editable or has_custom:
+                    below_ports_queue.append((name, port))
+                current_y += ROW_H
+            else:
+                if port.visible and port.allow_connection:
+                    pi = PortItem(port, self)
+                    pi.setPos(0, current_y + ROW_H / 2)
+                    self._port_items[name] = pi
+                if is_editable or has_custom:
+                    proxy = self._build_input_widget(name, port, current_y)
+                    if proxy:
+                        self._proxies[name] = proxy
+                current_y += ROW_H
 
-            current_y += ROW_H
+        # Pass 2: below_ports widgets placed after all normal rows
+        for name, port in below_ports_queue:
+            port_rh = getattr(port, 'row_height', None) or ROW_H
+            proxy = self._build_input_widget(name, port, current_y)
+            if proxy:
+                self._proxies[name] = proxy
+            current_y += port_rh
 
     def _build_input_widget(self, name: str, port, current_y: float):
         """Create and return the proxy widget for an editable input port, or None."""
+        full_row = getattr(port, 'full_row', False)
+        below_flag = getattr(port, 'below_ports', False)
+        span_full = full_row or below_flag
+
+        # Ask the node for a custom widget first (registered builder or override).
+        widget = self.node.create_widget_for_port(port)
+        if widget is not None:
+            self._port_widgets[name] = widget
+            self._connect_widget_events(name, widget)
+            if span_full:
+                proxy = QGraphicsProxyWidget(self)
+                proxy.setWidget(widget)
+                proxy.setPos(PAD / 2, current_y + 2)
+                return proxy
+            return self._create_proxy(widget, current_y)
+
+        # Fall back to a standard widget based on port type.
         container = QWidget()
         container.setAttribute(Qt.WA_StyledBackground)
         container.setObjectName("InputContainer")
-
-        bg = "transparent"
-        container.setStyleSheet(f"""
-            #InputContainer {{
-                background-color: {bg};
-                border: 0px solid {BORDER_LIGHT};
-            }}
-        """)
-
-        # Attempt to create custom widget via node hooks; only mark as custom if one is returned
-        widget = self.node.create_widget_for_port(port, container)
-        is_custom_widget = (widget is not None)
-
-        # If no custom widget, create basic widget based on port type
-        if not widget:
-            widget = self._create_basic_widget(port, container)
-        
-        if widget:
-            if is_custom_widget:
-                if (hasattr(self.node, '_custom_widget_below_ports') and self.node._custom_widget_below_ports):
-                    ports_height = len(self.node.outputs) * ROW_H + len(self.node.inputs) * ROW_H
-                    widget_y = TITLE_H + ports_height
-    
-                    custom_container = QWidget()
-                    custom_container.setAttribute(Qt.WA_TranslucentBackground)
-                    layout = QVBoxLayout(custom_container)
-                    layout.setContentsMargins(0, 0, 0, 0)
-                    layout.setSpacing(0)
-                    layout.addWidget(widget)
-                    
-                    self._port_widgets[name] = widget
-                    
-                    self._connect_widget_events(name, widget)
-                    
-                    proxy = QGraphicsProxyWidget(self)
-                    proxy.setWidget(custom_container)
-                    # this is retarded
-                    proxy.setPos(PAD/2, widget_y)
-                    
-                    return proxy
-                else:
-                    # Default behavior for inline custom widgets
-                    custom_container = QWidget()
-                    custom_container.setAttribute(Qt.WA_TranslucentBackground)
-                    layout = QHBoxLayout(custom_container)
-                    layout.setContentsMargins(0, 0, 0, 0)
-                    layout.setSpacing(0)
-                    layout.addWidget(widget)
-                    
-                    # Store widget reference for updates
-                    self._port_widgets[name] = widget
-                    
-                    # Connect widget events
-                    self._connect_widget_events(name, widget)
-                    
-                    return self._create_proxy(custom_container, current_y)
-            else:
-                # Use dark container for basic widgets
-                layout = QHBoxLayout(container)
-                layout.setContentsMargins(2, 0, 2, 0)
-                layout.setSpacing(2)
-                layout.addWidget(widget)
-                
-                # Store widget reference for updates
-                self._port_widgets[name] = widget
-                
-                # Connect widget events
-                self._connect_widget_events(name, widget)
-                
-                return self._create_proxy(container, current_y)
-        
-        return None
+        container.setStyleSheet(
+            f"#InputContainer {{ background-color: transparent; border: 0px solid {BORDER_LIGHT}; }}"
+        )
+        widget = self._create_basic_widget(port, container)
+        if widget is None:
+            return None
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
+        layout.addWidget(widget)
+        self._port_widgets[name] = widget
+        self._connect_widget_events(name, widget)
+        if span_full:
+            proxy = QGraphicsProxyWidget(self)
+            proxy.setWidget(container)
+            proxy.setPos(PAD / 2, current_y + 2)
+            return proxy
+        return self._create_proxy(container, current_y)
     
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
@@ -497,16 +499,16 @@ class NodeItem(QGraphicsItem):
             return combo
             
         else:
-            # Text input for STRING, INT, FLOAT, ANY
+            # Text input for STRING, INT, FLOAT, FILE, ANY
             edit = QLineEdit(parent)
             edit.setFixedHeight(22)
             edit.setStyleSheet(NODE_WIDGET_STYLE)
-            
+
             v = port.value
             val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
             edit.setText(val_str)
             edit.setProperty("original_val", port.value)
-            
+
             return edit
 
     def _create_proxy(self, container: QWidget, current_y: float) -> QGraphicsProxyWidget:
@@ -592,34 +594,10 @@ class NodeItem(QGraphicsItem):
         port = self.node.inputs.get(port_name)
         if not port or port.value == new_val:
             return
-            
-        old_val = port.value
-        port.value = new_val
-        #self._update_port_display(port_name)
-        
-        # Update node and scene
-        scene = self.scene()
-        if scene:
-            scene._after_node_mutation(self.node.id)
-            scene._emit_graph_changed()
-
-    def _on_widget_changed(self, port_name: str, new_value: str):
-        """Handle widget value changes."""
-        port = self.node.inputs.get(port_name)
-        if not port:
-            return
-            
-        if port.value == new_value:
-            return
-            
-        port.value = new_value
-        #self._update_port_display(port_name)
-        
-        # Update node and scene
-        scene = self.scene()
-        if scene:
-            scene._after_node_mutation(self.node.id)
-            scene._emit_graph_changed()
+        sc = self.scene()
+        if sc:
+            from gui.node_editor import PropertyCommand
+            sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText():
@@ -923,19 +901,38 @@ class NodeItem(QGraphicsItem):
                 pi.setPos(self._w, pi.y())
 
         lbl_w = self.node.label_width or LBL_W_MIN
+        stretch_proxies: list[tuple[float, str, QGraphicsProxyWidget]] = []
+
         for name, proxy in self._proxies.items():
-            is_below = self.node.has_gui_builder(name) and getattr(self.node, '_custom_widget_below_ports', False)
-            if not is_below:
+            port = self.node.inputs.get(name)
+            span_full = port and (getattr(port, 'full_row', False) or getattr(port, 'below_ports', False))
+            if span_full:
+                proxy.setPos(PAD / 2, proxy.y())
+                if getattr(port, 'row_stretch', False):
+                    stretch_proxies.append((proxy.y(), name, proxy))
+                else:
+                    port_rh = getattr(port, 'row_height', None) or ROW_H
+                    proxy.widget().setFixedHeight(max(10, port_rh - 4))
+            else:
                 proxy.setPos(PR + PAD + lbl_w + 2, proxy.y())
 
-            # Horizontal scaling
-            right_gap = 4 if not self._output_port_names else (PR + 2)
-            proxy.widget().setFixedWidth(max(10, self._w - proxy.x() - right_gap))
-            
-            # Vertical scaling: If it's a "below ports" custom widget, let it fill remaining space
-            if is_below:
-                available_h = self._h - proxy.y() - PAD
-                proxy.widget().setFixedHeight(max(10, available_h))
+            # Symmetric PAD/2 margins for span-full; normal right gap otherwise
+            if span_full:
+                proxy.widget().setFixedWidth(max(10, int(self._w - PAD)))
+            else:
+                right_gap = 4 if not self._output_port_names else (PR + 2)
+                proxy.widget().setFixedWidth(max(10, int(self._w - proxy.x() - right_gap)))
+
+        # Distribute available height equally among stretch proxies
+        if stretch_proxies:
+            stretch_proxies.sort(key=lambda t: t[0])
+            first_y = stretch_proxies[0][0]
+            n = len(stretch_proxies)
+            available = max(n * ROW_H, self._h - first_y - PAD)
+            each_h = available / n
+            for i, (_, name, proxy) in enumerate(stretch_proxies):
+                proxy.setPos(proxy.x(), first_y + i * each_h)
+                proxy.widget().setFixedHeight(max(10, int(each_h) - 4))
 
     def port_item(self, name: str) -> PortItem | None:
         return self._port_items.get(name)
@@ -943,7 +940,9 @@ class NodeItem(QGraphicsItem):
     def set_port_connected(self, port_name: str, connected: bool, source_port_type: PortType | None = None) -> None:
         proxy = self._proxies.get(port_name)
         if proxy:
-            if not self.node.has_gui_builder(port_name):
+            port = self.node.inputs.get(port_name)
+            span_full = port and (getattr(port, 'full_row', False) or getattr(port, 'below_ports', False))
+            if not span_full and not self.node.has_gui_builder(port_name):
                 proxy.setVisible(not connected)
         port_item = self._port_items.get(port_name)
         if port_item:
@@ -1027,24 +1026,20 @@ class NodeItem(QGraphicsItem):
 
         painter.setClipping(False)
 
-        # Stacked Outlines (drawn without clipping so rings render outside the body)
         pen_w = 1.0
 
-        # 1. Base Border
         painter.setPen(QPen(QColor(Qt.black), pen_w))
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(body, r, r)
 
         current_offset = 0
 
-        # 2. Selection Outline
         if self.isSelected():
             current_offset += pen_w
             painter.setPen(QPen(QColor(ACCENT), pen_w))
             painter.drawRoundedRect(body.adjusted(-current_offset, -current_offset, current_offset, current_offset),
                                      r + current_offset, r + current_offset)
 
-        # 3. Error Outline
         if self.node.error_msg or self._has_required_error():
             current_offset += pen_w
             painter.setPen(QPen(QColor(COLOR_INVALID), pen_w))
@@ -1072,8 +1067,7 @@ class NodeItem(QGraphicsItem):
         # Draw title text with drop shadow
         title_text = self.node.display_name.upper()
         
-        # Start title after the fold indicator
-        title_start_x = PAD + 25  # 20px for indicator + 5px spacing
+        title_start_x = PAD + 25 
         title_right_pad = 18 if not self.node.locked_title else 2 * PAD
         
         # Set up drop shadow
@@ -1134,10 +1128,19 @@ class NodeItem(QGraphicsItem):
         row_offset_y = TITLE_H + visible_out_idx * ROW_H
         for name, port in self.node.inputs.items():
             is_editable = port.port_type in _EDITABLE and port.editable
-            if not port.visible and not is_editable:
+            has_custom = self.node.has_gui_builder(name)
+            full_row = getattr(port, 'full_row', False)
+            below_flag = getattr(port, 'below_ports', False)
+            port_rh = getattr(port, 'row_height', None) or ROW_H
+            if not port.visible and not is_editable and not has_custom and not full_row:
                 continue
 
-            # Always draw the left-side label in the scene
+            if full_row:
+                # No label; widget spans the full row
+                row_offset_y += port_rh
+                continue
+
+            # Draw the left-side label
             painter.setPen(label_col)
             painter.drawText(
                 QRectF(PR + PAD, row_offset_y, lbl_w, ROW_H),
@@ -1145,7 +1148,7 @@ class NodeItem(QGraphicsItem):
                 _elide(port.label or name, int(lbl_w / 6)),
             )
             # When connected: show the live value text on the right (proxy is hidden)
-            if is_editable:
+            if is_editable and not below_flag:
                 sc = self.scene()
                 if sc and hasattr(sc, "graph"):
                     conn = sc.graph.get_input_connection(self.node.id, name)

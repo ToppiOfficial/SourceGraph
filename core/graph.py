@@ -102,6 +102,13 @@ class Graph:
         for cb in self.on_changed:
             cb()
 
+    def commit_change(self, description: str = "Change") -> None:
+        """Force an immediate history commit via the associated scene."""
+        self._notify()
+        scene = getattr(self, "_scene_ref", lambda: None)()
+        if scene and hasattr(scene, "_undo_manager"):
+            scene._undo_manager.notify_immediate(description)
+
     def add_node(self, node: BaseNode) -> None:
         self.nodes[node.id] = node
         self._notify()

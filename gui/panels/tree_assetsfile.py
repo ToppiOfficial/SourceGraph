@@ -223,7 +223,7 @@ class AssetBrowserWidget(BaseBrowserWidget):
     def _on_import(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Import Assets", "",
-            "Source Assets (*.dmx *.smd);;Subgraphs (*.srcsubgraph);;All (*)"
+            "All Files (*)"
         )
         if not files:
             return
@@ -248,7 +248,7 @@ class AssetBrowserWidget(BaseBrowserWidget):
     def _on_import_to_folder(self, folder_item):
         files, _ = QFileDialog.getOpenFileNames(
             self, "Import Assets to Folder", "",
-            "Source Assets (*.dmx *.smd);;Subgraphs (*.srcsubgraph);;All (*)"
+            "All Files (*)"
         )
         if not files:
             return
@@ -270,10 +270,46 @@ class AssetBrowserWidget(BaseBrowserWidget):
                 self._sync_to_graph()
 
     def _on_find_missing(self):
+        from gui.menu.asset_finder import AssetFinderDialog
         missing = [p for p in self.tree_widget.all_paths() if not os.path.exists(p)]
         if not missing:
             return
-        print(f"[Assets] Missing files: {missing}")
+        dlg = AssetFinderDialog(missing, self)
+        if dlg.exec() != 1:
+            return
+        results = dlg.get_results()
+        if not results:
+            return
+        with self.main_window.scene._undo_manager.transaction("Resolve Missing Assets"):
+            for item in self.tree_widget._all_assets():
+                old_path = item.text(2)
+                if old_path not in results:
+                    continue
+                new_path = results[old_path]
+                name = os.path.basename(new_path)
+                ext = os.path.splitext(new_path)[1][1:].upper() or "FILE"
+                item.setText(0, name)
+                item.setText(1, ext)
+                item.setText(2, new_path)
+                item.setToolTip(0, f"Name: {name}\nPath: {new_path}\nType: {ext}")
+                item.setToolTip(1, f"Type: {ext}\nPath: {new_path}")
+                item.setToolTip(2, new_path)
+                if os.path.exists(new_path) and is_file_readable(new_path):
+                    letter = name[0].upper() if name else "A"
+                    item.setIcon(0, get_file_icon(letter=letter, is_image=is_image_file(new_path)))
+                else:
+                    item.setIcon(0, get_blank_file_icon())
+            # Remap port values on any node that references a resolved path
+            scene = self.main_window.scene
+            for node in self.main_window.graph.nodes.values():
+                for port in node.inputs.values():
+                    if port.value in results:
+                        port.value = results[port.value]
+                        scene._after_node_mutation(node.id)
+                        break
+            self._sync_to_graph()
+            scene._emit_graph_changed()
+        self.refresh_status()
 
     def _put_selected_in_folder(self, tree_widget, selected_items, folder_name):
         with self.main_window.scene._undo_manager.transaction("Put Items in Folder"):

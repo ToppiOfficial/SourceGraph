@@ -92,21 +92,6 @@ QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QSplitter::handle               {{ background: {BORDER_DARK}; }}
 """
 
-# -- Breadcrumb navigation -----------------------------------------------------
-BREADCRUMB_NODE = """
-QPushButton {
-    background-color: %s;
-    border: 1px solid %s;
-    border-radius: 4px;
-    color: white;
-    padding: 3px 10px;
-    min-width: 80px;
-    font-size: 10px;
-    font-weight: bold;
-}
-QPushButton:hover { background-color: %s; }
-"""
-
 # -- Component Stylesheets -----------------------------------------------------
 EDIT_STYLE = f"""
 QLineEdit {{
@@ -169,7 +154,7 @@ BTN_STYLE = f"""
 QPushButton {{
     background: {BG_SURFACE}; color: {FG_MAIN};
     border: 1px solid {BORDER_DARK}; border-radius: 2px;
-    padding: 4px 8px; font-family: {FONT_UI}; font-size: {FONT_MD};
+    padding: 1px 1px; font-family: {FONT_UI}; font-size: {FONT_MD};
 }}
 QPushButton:hover {{ background: {BG_HOVER}; }}
 """
@@ -465,6 +450,17 @@ QComboBox QAbstractItemView {{
     color: {FG_MAIN};
     selection-background-color: {BG_SELECTED};
 }}
+"""
+
+NODE_FILE_LABEL_STYLE = f"""
+    QLabel {{
+        background-color: #1e1e1e;
+        border: 1px solid #3a3a3a;
+        border-radius: 4px;
+        padding: 4px 8px;
+        color: {FG_MAIN};
+        font-size: 10px;
+    }}
 """
 
 # -- Icon Creation Functions ---------------------------------------------------

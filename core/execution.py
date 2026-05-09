@@ -64,13 +64,20 @@ class StandardExecutionEngine:
         Executes a single node, handling the full lifecycle (hooks, coercion, etc).
         This unifies execution logic between the main engine and the GUI panels.
         """
-        node = graph.nodes[nid]
-        
-        if context.on_node_start:
-            context.on_node_start(nid, node.title)
-        
+        node = None
         start_time = time.perf_counter()
         try:
+            node = graph.nodes.get(nid)
+            if node is None:
+                raise RuntimeError(f"Node not found in graph: {nid}")
+
+            if context.on_node_start:
+                context.on_node_start(nid, node.title)
+
+            validation_error = node.validate()
+            if validation_error:
+                raise ValueError(node.error_msg)
+
             # Gather input values from connected nodes
             connected = {
                 c.dst_port: (results.get(c.src_node).outputs if results.get(c.src_node) else {}).get(c.src_port)
@@ -141,7 +148,9 @@ class StandardExecutionEngine:
                 
         except Exception as exc:
             error_msg = str(exc)
-            node.error_msg = error_msg
+            if node is not None:
+                node.error_msg = error_msg
+                node.last_execution_time = time.perf_counter() - start_time
             result_obj = ExecutionResult(nid, {}, error=error_msg)
             
             if context.on_node_error:

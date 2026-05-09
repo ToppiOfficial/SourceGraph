@@ -9,11 +9,13 @@ from PySide6.QtGui import QColor, QKeyEvent, QPalette, QPainter
 from gui.theme import *
 from core.graph import Graph
 
+
+
 class NodeSearchDialog(QDialog):
     def __init__(self, parent=None, source_port: Port | None = None) -> None:
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setFixedSize(800, 480)
+        self.setFixedSize(1000, 480)
         
         self.source_port = source_port
         self.selected_class = None
@@ -37,7 +39,7 @@ class NodeSearchDialog(QDialog):
 
         # Category list on the left
         self.category_list_widget = QListWidget()
-        self.category_list_widget.setFixedWidth(150)
+        self.category_list_widget.setFixedWidth(200)
         self.category_list_widget.setStyleSheet(CATEGORY_LIST_STYLE)
         self.category_list_widget.itemClicked.connect(self._on_category_selected)
         self.content_layout.addWidget(self.category_list_widget)
@@ -230,7 +232,6 @@ class NodeSearchDialog(QDialog):
         node_class = current_item.data(Qt.UserRole)
 
         render_container = QFrame()
-        render_container.setFixedHeight(180)
         render_container.setStyleSheet(f"""
             QFrame {{
                 background-color: {BG_DARK};
@@ -243,40 +244,42 @@ class NodeSearchDialog(QDialog):
 
         preview_view = QGraphicsView()
         preview_scene = QGraphicsScene()
-        preview_scene.graph = Graph() # Mock graph for NodeItem logic
-        preview_scene.refresh_connections = lambda x: None # Mock method for NodeItem logic
-        
+        preview_scene.graph = Graph()
+        preview_scene.refresh_connections = lambda x: None
+
         preview_view.setScene(preview_scene)
         preview_view.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform | QPainter.TextAntialiasing)
         preview_view.setFrameShape(QFrame.NoFrame)
         preview_view.setStyleSheet("background: transparent;")
-        preview_view.setAlignment(Qt.AlignCenter)
+        preview_view.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         preview_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         preview_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
+
         try:
             node_inst = node_class()
             node_inst.graph = preview_scene.graph
             node_item = NodeItem(node_inst)
             node_item.setPos(0, 0)
             preview_scene.addItem(node_item)
-            
-            # Calculate bounds
+
             scene_rect = preview_scene.itemsBoundingRect()
-            padding = 40
+            padding = 16
             padded_rect = scene_rect.adjusted(-padding, -padding, padding, padding)
-            
             preview_scene.setSceneRect(padded_rect)
-            preview_view.fitInView(padded_rect, Qt.KeepAspectRatio)
-            
-            # Prevent "upscaling" (zoomed in look). If the node is smaller than 
-            # the preview area, keep it at 1:1 scale centered.
-            if preview_view.transform().m11() > 1.0:
-                preview_view.resetTransform()
-                
+
+            # Available width: panel(280) - preview_layout margins(32) - render_layout margins(8) = 240px.
+            # Scale down only — never upscale a small node.
+            avail_w = 240
+            scale = min(avail_w / padded_rect.width(), 1.0) if padded_rect.width() > 0 else 1.0
+            # Size the container to exactly fit the scaled node height.
+            container_h = max(60, int(padded_rect.height() * scale) + 8)
+            render_container.setFixedHeight(container_h)
+
+            preview_view.resetTransform()
+            preview_view.scale(scale, scale)
             render_layout.addWidget(preview_view)
         except Exception:
-            pass
+            render_container.setFixedHeight(80)
 
         self.preview_layout.addWidget(render_container)
         self.preview_layout.addSpacing(12)

@@ -20,7 +20,12 @@ class SubgraphNode(BaseNode):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "graph_path": ("FILE", {"default": "", "visible": False, "enum_filter": [".srcsubgraph"]}),
+                "graph_path": ("FILE", {
+                    "default": "",
+                    "visible": False,
+                    "full_row": True,
+                    "enum_filter": [".srcsubgraph"],
+                }),
             }
         }
 
@@ -28,6 +33,11 @@ class SubgraphNode(BaseNode):
 
     def on_property_changed(self):
         path = self.inputs.get("graph_path", {}).value if "graph_path" in self.inputs else ""
+        if hasattr(self, '_subgraph_label'):
+            try:
+                self._subgraph_label.setText(os.path.basename(path) if path else "Select subgraph…")
+            except RuntimeError:
+                pass
         if not path:
             return
 
@@ -142,6 +152,68 @@ class SubgraphNode(BaseNode):
         # Default to ANY if we can't determine the type
         return PortType.ANY
 
+    def create_widget_for_port(self, port):
+        if port.name != "graph_path":
+            return None
+
+        from PySide6.QtWidgets import QPushButton, QHBoxLayout, QWidget, QLabel
+        from gui.theme import BTN_STYLE
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        from gui.theme import NODE_FILE_LABEL_STYLE
+        self._subgraph_label = QLabel(os.path.basename(port.value) if port.value else "Select subgraph…")
+        self._subgraph_label.setStyleSheet(NODE_FILE_LABEL_STYLE)
+        layout.addWidget(self._subgraph_label, 1)
+
+        browse_btn = QPushButton("...")
+        browse_btn.setFixedWidth(24)
+        browse_btn.setStyleSheet(BTN_STYLE)
+        browse_btn.clicked.connect(self._show_subgraph_dialog)
+        layout.addWidget(browse_btn)
+
+        self._graph_path_port = port
+        return container
+    
+    def _show_subgraph_dialog(self):
+        from gui.menu.file_search_dialog import SubgraphSearchDialog
+        from PySide6.QtWidgets import QApplication
+        from gui.main_window import MainWindow
+        main_window = next(
+            (w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None
+        )
+        dialog = SubgraphSearchDialog(parent=main_window)
+        if dialog.exec() == SubgraphSearchDialog.Accepted and dialog.selected_file:
+            self._set_graph_path(dialog.selected_file)
+
+    def _set_graph_path(self, path: str) -> None:
+        if hasattr(self, '_graph_path_port'):
+            self._graph_path_port.value = path
+        if hasattr(self, '_subgraph_label'):
+            try:
+                self._subgraph_label.setText(os.path.basename(path))
+            except RuntimeError:
+                pass
+        self.on_property_changed()
+        if self.graph:
+            # Remove connections to ports that no longer exist after the subgraph change
+            self.graph.connections = [
+                c for c in self.graph.connections
+                if not (
+                    (c.src_node == self.id and c.src_port not in self.outputs) or
+                    (c.dst_node == self.id and c.dst_port not in self.inputs)
+                )
+            ]
+            self.graph.commit_change("Change Subgraph")
+            scene = getattr(self.graph, '_scene_ref', lambda: None)()
+            if scene:
+                item = scene._node_items.get(self.id)
+                if item:
+                    item.refresh_ports()
+
     def execute(self, graph_path: str, **kwargs):
         path = graph_path
         if path and not os.path.isabs(path) and self.graph and self.graph.project_dir:
@@ -151,6 +223,7 @@ class SubgraphNode(BaseNode):
             return {}
 
         try:
+            self.error_msg = None
             from core.graph import Graph
             sub = Graph()
             sub.load(path, NODE_CLASS_MAPPINGS)
@@ -181,8 +254,12 @@ class SubgraphNode(BaseNode):
                         outputs[original_pname] = node._captured_value
             return outputs
         except Exception as e:
-            print(f"[SubgraphNode] execute error: {e}")
-            return {}
+            from gui.logger import log
+            path_port = self.inputs.get("graph_path")
+            name = os.path.basename(path_port.value) if path_port and path_port.value else "subgraph"
+            self.error_msg = str(e)
+            log.error(f"[SubgraphNode '{name}'] {e}")
+            raise
 
 
 class SubgraphInputNode(BaseNode):

@@ -9,7 +9,7 @@ import traceback
 from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QFileDialog, QToolBar, QStatusBar, QMessageBox, QMenu, QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QPushButton)
 from PySide6.QtGui     import QAction, QKeySequence, QIcon, QPixmap, QPainter, QActionGroup
-from PySide6.QtCore    import Qt, QSize, QByteArray, QEvent
+from PySide6.QtCore    import Qt, QSize, QByteArray, QEvent, QTimer
 from dataclasses import dataclass, field
 
 from core.graph    import Graph
@@ -48,6 +48,8 @@ class NavNode:
     scene: NodeEditorScene
     parent: NavNode | None = None
     children: dict[str, NavNode] = field(default_factory=dict) # path -> NavNode
+    has_cycle: bool = False
+    exec_error: bool = False
 
 
 class MainWindow(QMainWindow):
@@ -132,7 +134,14 @@ class MainWindow(QMainWindow):
 
     def set_external_state(self, state: dict) -> None:
         exec_p = self.panel_manager.get_widget("ExecutionDock")
-        if exec_p: exec_p.set_project_state(state.get("execution", []))
+        if exec_p:
+            # Preserve checkbox state — checked/unchecked is not undoable
+            saved_disabled = {s.name: set(s.disabled_nodes) for s in exec_p.sessions.values()}
+            exec_p.set_project_state(state.get("execution", []))
+            for s in exec_p.sessions.values():
+                if s.name in saved_disabled:
+                    s.disabled_nodes = saved_disabled[s.name]
+            exec_p._refresh_node_list()
         
         # Restore minimap state
         minimap_state = state.get("minimap", {})
@@ -696,10 +705,8 @@ class MainWindow(QMainWindow):
         with self.scene._undo_manager.transaction(f"Remove Asset: {os.path.basename(path)}"):
             self.graph.assets.remove(path)
 
-            # 1. Update nodes in scene
             self.scene.on_asset_removed(path)
 
-            # 2. Refresh Asset Browser UI
             assets_panel = self.panel_manager.get_widget("AssetDock")
             if assets_panel:
                 assets_panel.refresh()
@@ -776,6 +783,9 @@ class MainWindow(QMainWindow):
     
     def _save(self) -> bool:
         """Save all dirty graphs in the navigation stack, or current graph if clean."""
+        exec_w = self.panel_manager.get_widget("ExecutionDock")
+        if exec_w and getattr(exec_w, '_eyedropper_active', False):
+            exec_w._cancel_eyedropper()
         if self.graph:
             if self._current_nav and self._current_nav.path:
                 if not self._save_to_path(self._current_nav.path, self.graph):
@@ -917,8 +927,9 @@ class MainWindow(QMainWindow):
         """Recursively discover SubgraphNodes and load them into the tree."""
         if not nav_node or not nav_node.graph:
             return
+        nav_node.has_cycle = False
+        nav_node.exec_error = False
 
-        # 1. Identify all subgraph nodes currently in this graph
         subgraph_paths = set()
         for node in nav_node.graph.nodes.values():
             if node.__class__.__name__ == "SubgraphNode":
@@ -946,6 +957,8 @@ class MainWindow(QMainWindow):
                 if is_cycle:
                     node.error_msg = f"Recursive loop detected: {os.path.basename(abs_path)}"
                     if item: item.update()
+                    nav_node.has_cycle = True
+                    log.error(f"[GraphMap] Recursive subgraph loop: '{os.path.basename(abs_path)}' is an ancestor of the current graph")
                 else:
                     if node.error_msg and "Recursive loop" in node.error_msg:
                         node.error_msg = None
@@ -954,12 +967,10 @@ class MainWindow(QMainWindow):
                     if os.path.exists(abs_path):
                         subgraph_paths.add(abs_path)
 
-        # 2. Cleanup orphaned children
         for p in list(nav_node.children.keys()):
             if p not in subgraph_paths:
                 del nav_node.children[p]
 
-        # 3. Add/Recurse children
         for path in subgraph_paths:
             if path not in nav_node.children:
                 try:
@@ -1040,8 +1051,19 @@ class MainWindow(QMainWindow):
             
             self._dirty = False
             self.statusBar().showMessage(f"Loaded {path}")
+
+            missing = [p for p in new_graph.assets if not os.path.exists(p)]
+            if missing:
+                for p in missing:
+                    log.info(f"[Assets] Missing file: {p}")
+                QTimer.singleShot(0, self._prompt_missing_assets)
         except Exception as e:
             log.error(f"Failed to load {path}: {e}")
+
+    def _prompt_missing_assets(self) -> None:
+        assets_widget = self.panel_manager.get_widget("AssetDock")
+        if assets_widget:
+            assets_widget._on_find_missing()
 
     def _on_subgraph_requested(self, path: str) -> None:
         abs_path = os.path.abspath(path)
@@ -1124,7 +1146,6 @@ class MainWindow(QMainWindow):
         crash_dir = os.path.join(root_dir, "crash")
         os.makedirs(crash_dir, exist_ok=True)
 
-        # 1. Recover non-empty logs from system temp directory from previous crashed sessions
         temp_dir = tempfile.gettempdir()
         try:
             for f in os.listdir(temp_dir):
@@ -1151,7 +1172,6 @@ class MainWindow(QMainWindow):
                 except OSError:
                     pass
 
-        # 2. faulthandler for SIGSEGV/Fatal C crashes
         # We use a temporary file in the system temp directory
         try:
             self._fatal_log_temp = tempfile.NamedTemporaryFile(mode="w", prefix="srcgraph_crash_", suffix=".log", delete=False)
@@ -1159,7 +1179,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Failed to setup faulthandler: {e}")
 
-        # 3. sys.excepthook for unhandled Python exceptions
         def handle_exception(etype, value, tb):
             timestamp = int(time.time())
             log_path = os.path.join(crash_dir, f"python_exception_{timestamp}.log")

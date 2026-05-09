@@ -222,6 +222,17 @@ class HistoryManager:
             self._restoring = False
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
+    def sync(self) -> None:
+        """Re-sync committed baseline after a non-managed QUndoCommand completes.
+
+        Call this at the end of undo() and redo() on commands that are pushed
+        directly to undo_stack rather than through HistoryManager.push().
+        """
+        if self._restoring:
+            return
+        self._debounce.stop()
+        self._committed = StateSnapshot.capture(self.graph, self._get_ext())
+
     def clear(self) -> None:
         self.stack.clear()
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())

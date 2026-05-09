@@ -156,6 +156,15 @@ class SelectedNodePanel(QWidget):
             lbl.setStyleSheet(f"color:{FG_MAIN};")
             rl.addWidget(lbl)
 
+            custom_w = None
+            if not conn and hasattr(node, 'create_widget_for_port'):
+                custom_w = node.create_widget_for_port(port)
+            if custom_w is not None:
+                rl.addWidget(custom_w, 1)
+                self._rows.insertWidget(insert_at, row)
+                insert_at += 1
+                continue
+
             if conn:
                 src = graph.nodes.get(conn.src_node)
                 hint = f"← {src.title if src else conn.src_node}:{conn.src_port}"

@@ -17,6 +17,7 @@ from gui.dialogs import RenameDialog
 from core.execution import (
     ExecutionContext, StandardExecutionEngine, ExecutionResult
 )
+from gui.logger import log
 from PySide6.QtGui import QColor
 from gui.theme import *
 from gui.theme import get_execution_icon
@@ -115,19 +116,39 @@ class ExecutionItemWidget(QWidget):
     
     def _format_display_text(self) -> str:
         """Format the display text with execution order and node info."""
+        node_default = self.node.title  # class-level default (e.g. "Print")
         node_class = self.node.__class__.__name__.replace("Node", "")
-        display_text = f"{self.node.title}"
-        
-        if hasattr(self.node, "graph") and getattr(self.node.graph, "_is_dirty", False):
-            display_text += " (!)"
-            
+        node_custom = getattr(self.node, 'custom_name', None)
+        node_custom = node_custom.strip() if node_custom else ""
+
+        # Build the fixed node label: "Custom Name [Default]" or just "Default"
+        if node_custom:
+            node_label = f"{node_custom} [{node_default}]"
+        else:
+            node_label = node_default
+
+        # Session custom name prefix
+        if self.custom_name:
+            return f"{self.custom_name} ({node_label})"
+
+        # No session custom name
+        if node_custom:
+            return node_label  # "Custom Name [Default]"
+
+        # Fallback: default title + class
+        display_text = node_default
         if len(display_text) < 40:
             display_text += f" ({node_class})"
-        
-        if self.custom_name:
-            return f"({display_text}) {self.custom_name}"
-
         return display_text
+
+    def set_error_highlight(self, active: bool):
+        color = COLOR_ERROR if active else FG_MAIN
+        self.text_label.setStyleSheet(f"""
+            color: {color};
+            font-size: 12px;
+            font-weight: 500;
+            padding: 2px;
+        """)
     
     def is_checked(self) -> bool:
         return self.checkbox.isChecked()
@@ -142,6 +163,7 @@ class ExecutionListWidget(QListWidget):
     execute_item_requested = Signal(str)  # Signal for executing single item
     rename_item_requested = Signal(str)  # Signal for renaming single item
     item_order_changed = Signal()  # Signal emitted when items are reordered
+    replace_target_requested = Signal(str)  # node_id to replace
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -207,16 +229,13 @@ class ExecutionListWidget(QListWidget):
             if current_item:
                 widget = self.itemWidget(current_item)
                 if widget:
-                    current_name = widget.custom_name if widget.custom_name else widget._format_display_text()
-                    dialog = RenameDialog("Rename Execution Item", current_name, "Enter new name:", self)
-                    
+                    dialog = RenameDialog("Rename Execution Item", widget.custom_name, "Custom name (leave empty to clear):", self)
                     if dialog.exec() == QDialog.Accepted:
                         new_name = dialog.get_name()
-                        if new_name and new_name != current_name:
+                        if new_name != widget.custom_name:
                             widget.custom_name = new_name
                             widget.update_display_text()
                             widget.name_changed.emit(new_name)
-                            print(f"[Execution] Renamed item to: {new_name}")
             event.accept()
             return
         elif event.key() == Qt.Key_Escape:
@@ -255,22 +274,26 @@ class ExecutionListWidget(QListWidget):
         rename_action = QAction("Rename execution", self)
         rename_action.triggered.connect(self._rename_item)
         menu.addAction(rename_action)
-        
+
+        replace_action = QAction("Replace target node", self)
+        replace_action.triggered.connect(self._start_replace_target)
+        menu.addAction(replace_action)
+
         menu.addSeparator()
-        
+
         # Add "Execute this item" option
         execute_action = QAction("Execute this item", self)
         execute_action.triggered.connect(self._execute_item)
         menu.addAction(execute_action)
-        
+
         menu.addSeparator()
-        
+
         check_action = QAction("Check Nodes", self)
         check_action.triggered.connect(self._check_nodes)
         menu.addAction(check_action)
-        
+
         menu.addSeparator()
-        
+
         remove_action = QAction("Remove from Session", self)
         remove_action.triggered.connect(self.delete_requested.emit)
         menu.addAction(remove_action)
@@ -309,16 +332,13 @@ class ExecutionListWidget(QListWidget):
         if item:
             widget = self.itemWidget(item)
             if widget:
-                current_name = widget.custom_name if widget.custom_name else widget._format_display_text()
-                dialog = RenameDialog("Rename Execution Item", current_name, "Enter new name:", self)
-                
+                dialog = RenameDialog("Rename Execution Item", widget.custom_name, "Custom name (leave empty to clear):", self)
                 if dialog.exec() == QDialog.Accepted:
                     new_name = dialog.get_name()
-                    if new_name and new_name != current_name:
+                    if new_name != widget.custom_name:
                         widget.custom_name = new_name
                         widget.update_display_text()
                         widget.name_changed.emit(new_name)
-                        print(f"[Execution] Renamed item to: {new_name}")
     
     def _check_nodes(self):
         """Emit signal to check/highlight selected nodes."""
@@ -326,7 +346,19 @@ class ExecutionListWidget(QListWidget):
         if selected_items:
             node_ids = [item.data(Qt.UserRole) for item in selected_items]
             self.check_nodes_requested.emit(node_ids)
-    
+
+    def _start_replace_target(self):
+        """Emit signal to start eyedropper mode for the right-clicked item."""
+        item = self.itemAt(self._context_menu_position)
+        if not item:
+            selected = self.selectedItems()
+            if selected:
+                item = selected[0]
+        if item:
+            node_id = item.data(Qt.UserRole)
+            if node_id:
+                self.replace_target_requested.emit(node_id)
+
     def add_execution_item(self, node, node_id, index):
         """Add an execution item with checkbox and execution icon."""
         # Create custom widget
@@ -358,25 +390,36 @@ class ExecutionSession:
     
     def __init__(self, name: str = "Session"):
         self.name = name
-        self.node_ids: list[str] = []  # Nodes to execute in order
-        self.node_names: dict[str, str] = {}  # Custom names for nodes
+        self.node_ids: list[str] = []
+        self.node_names: dict[str, str] = {}
+        self.disabled_nodes: set[str] = set()  # unchecked nodes
         self.results: dict[str, Any] = {}
-        
+
+    def is_enabled(self, node_id: str) -> bool:
+        return node_id not in self.disabled_nodes
+
+    def set_enabled(self, node_id: str, enabled: bool) -> None:
+        if enabled:
+            self.disabled_nodes.discard(node_id)
+        else:
+            self.disabled_nodes.add(node_id)
+
     def add_node(self, node_id: str, custom_name: str = "") -> None:
         if node_id not in self.node_ids:
             self.node_ids.append(node_id)
             if custom_name:
                 self.node_names[node_id] = custom_name
-            
+
     def remove_node(self, node_id: str) -> None:
         if node_id in self.node_ids:
             self.node_ids.remove(node_id)
-            if node_id in self.node_names:
-                del self.node_names[node_id]
-            
+            self.node_names.pop(node_id, None)
+            self.disabled_nodes.discard(node_id)
+
     def clear(self) -> None:
         self.node_ids.clear()
         self.node_names.clear()
+        self.disabled_nodes.clear()
         self.results.clear()
         
     def set_node_name(self, node_id: str, name: str) -> None:
@@ -402,6 +445,10 @@ class ExecutionPanel(QWidget):
         self.sessions: dict[str, ExecutionSession] = {}
         self.current_session: ExecutionSession | None = None
         self._is_updating = False
+        self._eyedropper_active = False
+        self._eyedropper_target_id: str | None = None
+        self._last_failed_node_id: str | None = None
+        self._failed_session_items: set[str] = set()
         
         self._setup_ui()
         
@@ -458,7 +505,6 @@ class ExecutionPanel(QWidget):
         # Rename field row
         rename_layout = QHBoxLayout()
         self.session_rename_edit = QLineEdit()
-        self.session_rename_edit.setPlaceholderText("Rename session...")
         self.session_rename_edit.setStyleSheet(f"""
             QLineEdit {{
                 background: {BG_SURFACE};
@@ -472,9 +518,9 @@ class ExecutionPanel(QWidget):
                 border: 1px solid {ACCENT};
             }}
         """)
-        self.session_rename_edit.textChanged.connect(self._on_session_name_changed)
+        self.session_rename_edit.textEdited.connect(self._on_session_name_changed)
         self.session_rename_edit.returnPressed.connect(self._apply_session_rename)
-        self.session_rename_edit.editingFinished.connect(self._reset_session_rename_field)
+        self.session_rename_edit.editingFinished.connect(self._on_rename_editing_finished)
         rename_layout.addWidget(self.session_rename_edit, 1)
         
         layout.addLayout(rename_layout)
@@ -486,6 +532,7 @@ class ExecutionPanel(QWidget):
         self.node_list.check_nodes_requested.connect(self._check_nodes)
         self.node_list.execute_item_requested.connect(self._execute_single_item)
         self.node_list.rename_item_requested.connect(self._rename_execution_item)
+        self.node_list.replace_target_requested.connect(self._start_eyedropper)
         self.node_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.node_list.setDragEnabled(True)
         self.node_list.setAcceptDrops(True)
@@ -509,6 +556,8 @@ class ExecutionPanel(QWidget):
         
     def set_graph(self, graph, scene=None):
         """Set the graph to execute."""
+        if self._eyedropper_active:
+            self._cancel_eyedropper()
         self.graph = graph
         self._scene = scene
 
@@ -536,7 +585,8 @@ class ExecutionPanel(QWidget):
             state["sessions"].append({
                 "name": name,
                 "node_ids": list(session.node_ids),
-                "node_names": dict(session.node_names)
+                "node_names": dict(session.node_names),
+                "disabled_nodes": list(session.disabled_nodes),
             })
         return state
 
@@ -568,6 +618,7 @@ class ExecutionPanel(QWidget):
                 session = ExecutionSession(name)
                 session.node_ids = list(s_data.get("node_ids", []))
                 session.node_names = dict(s_data.get("node_names", {}))
+                session.disabled_nodes = set(s_data.get("disabled_nodes", []))
                 self.sessions[name] = session
                 self.session_combo.addItem(name)
                 
@@ -584,6 +635,11 @@ class ExecutionPanel(QWidget):
             
         # Ensure the list UI matches the now-restored current session
         self._refresh_node_list()
+        if self.current_session:
+            self.session_rename_edit.blockSignals(True)
+            self.session_rename_edit.setText(self.current_session.name)
+            self.session_rename_edit.blockSignals(False)
+            self._reset_rename_style()
 
     def _new_session(self, name: str | None = None):
         if name is None:
@@ -607,6 +663,9 @@ class ExecutionPanel(QWidget):
             self.session_combo.blockSignals(False)
             
             self.current_session = session
+            self.session_rename_edit.blockSignals(True)
+            self.session_rename_edit.setText(name)
+            self.session_rename_edit.blockSignals(False)
             self._sync_to_graph()
             print(f"[Session] Created new session: {name}")
         
@@ -623,24 +682,18 @@ class ExecutionPanel(QWidget):
                 self._new_session("default")
             
     def _on_session_changed(self, name: str):
-        # Guard against invalid session names (like False from combobox)
         if not name or not isinstance(name, str) or name not in self.sessions:
             return
-            
         self.current_session = self.sessions[name]
         self._refresh_node_list()
-        # Update rename field with current session name
-        self.session_rename_edit.clear()
-        self.session_rename_edit.setPlaceholderText(f"Rename '{name}'...")
+        self.session_rename_edit.blockSignals(True)
+        self.session_rename_edit.setText(name)
+        self.session_rename_edit.blockSignals(False)
+        self._reset_rename_style()
     
     def _on_session_name_changed(self, text: str):
-        """Validate session name as user types."""
-        if not text.strip():
-            return
-            
-        # Check for duplicate names (excluding current session)
         current_name = self.session_combo.currentText()
-        if text.strip() != current_name and text.strip() in self.sessions:
+        if text.strip() and text.strip() != current_name and text.strip() in self.sessions:
             self.session_rename_edit.setStyleSheet(f"""
                 QLineEdit {{
                     background: {BG_SURFACE};
@@ -652,82 +705,106 @@ class ExecutionPanel(QWidget):
                 }}
             """)
         else:
-            self.session_rename_edit.setStyleSheet(f"""
-                QLineEdit {{
-                    background: {BG_SURFACE};
-                    border: 1px solid {BORDER_LIGHT};
-                    border-radius: 3px;
-                    color: {FG_MAIN};
-                    padding: 4px;
-                    font-size: 11px;
-                }}
-                QLineEdit:focus {{
-                    border: 1px solid {ACCENT};
-                }}
-            """)
+            self._reset_rename_style()
     
     def _apply_session_rename(self):
-        """Apply the session rename when user presses Enter."""
         new_name = self.session_rename_edit.text().strip()
-        if not new_name:
-            return
-            
         current_name = self.session_combo.currentText()
-        
-        # Check for duplicate names
-        if new_name != current_name and new_name in self.sessions:
-            print(f"[Session] Cannot rename to '{new_name}': session already exists")
-            self.session_rename_edit.clear()
+
+        if not new_name or new_name == current_name:
+            self.session_rename_edit.blockSignals(True)
+            self.session_rename_edit.setText(current_name)
+            self.session_rename_edit.blockSignals(False)
+            self._reset_rename_style()
             return
-        
-        # Rename session
-        if new_name != current_name:
-            mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
-            with mgr.transaction(f"Rename Session: {current_name} → {new_name}") if mgr else nullcontext():
-                session = self.sessions.pop(current_name, None)
-                if session:
-                    session.name = new_name
-                    self.sessions[new_name] = session
-                    
-                    # Update combobox
-                    index = self.session_combo.findText(current_name)
-                    if index >= 0:
-                        self.session_combo.setItemText(index, new_name)
-                        self.session_combo.setCurrentText(new_name)
-                    
-                    self._sync_to_graph()
-                    print(f"[Session] Renamed '{current_name}' to '{new_name}'")
-        
-        self.session_rename_edit.clear()
-    
-    def _reset_session_rename_field(self):
-        """Reset the rename field when editing finishes."""
-        QTimer.singleShot(100, lambda: self.session_rename_edit.clear())
+
+        if new_name in self.sessions:
+            self.session_rename_edit.blockSignals(True)
+            self.session_rename_edit.setText(current_name)
+            self.session_rename_edit.blockSignals(False)
+            self._reset_rename_style()
+            return
+
+        mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
+        with mgr.transaction(f"Rename Session: {current_name} → {new_name}") if mgr else nullcontext():
+            session = self.sessions.pop(current_name, None)
+            if session:
+                session.name = new_name
+                self.sessions[new_name] = session
+                self.session_combo.blockSignals(True)
+                idx = self.session_combo.findText(current_name)
+                if idx >= 0:
+                    self.session_combo.setItemText(idx, new_name)
+                    self.session_combo.setCurrentIndex(idx)
+                self.session_combo.blockSignals(False)
+                self._sync_to_graph()
+
+        self.session_rename_edit.blockSignals(True)
+        self.session_rename_edit.setText(new_name)
+        self.session_rename_edit.blockSignals(False)
+        self._reset_rename_style()
+
+    def _on_rename_editing_finished(self):
+        current_name = self.session_combo.currentText()
+        if self.session_rename_edit.text() != current_name:
+            self.session_rename_edit.blockSignals(True)
+            self.session_rename_edit.setText(current_name)
+            self.session_rename_edit.blockSignals(False)
+            self._reset_rename_style()
+
+    def _reset_rename_style(self):
+        self.session_rename_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_SURFACE};
+                border: 1px solid {BORDER_LIGHT};
+                border-radius: 3px;
+                color: {FG_MAIN};
+                padding: 4px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {ACCENT};
+            }}
+        """)
             
     def _refresh_node_list(self):
         self.node_list.clear()
         if not self.current_session or not self.graph:
             return
-            
-        for idx, node_id in enumerate(self.current_session.node_ids):
+
+        display_idx = 0
+        for node_id in self.current_session.node_ids:
             node = self.graph.nodes.get(node_id)
             if node:
-                # Create enhanced list item with checkbox and custom name
                 custom_name = self.current_session.get_node_name(node_id)
-                item, widget = self.node_list.add_execution_item(node, node_id, idx)
+                item, widget = self.node_list.add_execution_item(node, node_id, display_idx)
                 if custom_name:
                     widget.custom_name = custom_name
                     widget.update_display_text()
-                # Update execution order display
-                widget.update_execution_order(idx)
-                # Connect name change signal
-                widget.name_changed.connect(lambda text, nid=node_id: self._on_item_name_changed(nid, text))
+                widget.update_execution_order(display_idx)
+                display_idx += 1
+                # Restore checked state
+                widget.checkbox.blockSignals(True)
+                widget.set_checked(self.current_session.is_enabled(node_id))
+                widget.checkbox.blockSignals(False)
+                # Persist checkbox changes to session
+                widget.checkbox.toggled.connect(
+                    lambda checked, nid=node_id: self._on_item_check_changed(nid, checked)
+                )
+                widget.name_changed.connect(
+                    lambda text, nid=node_id: self._on_item_name_changed(nid, text)
+                )
                 
     def _on_item_name_changed(self, node_id: str, name: str):
-        """Handle custom name change for an execution item."""
         if self.current_session:
             self.current_session.set_node_name(node_id, name)
             self._sync_to_graph()
+
+    def _on_item_check_changed(self, node_id: str, checked: bool):
+        if self.current_session and not self._is_updating:
+            self.current_session.set_enabled(node_id, checked)
+            if self.graph:
+                self.graph.execution_sessions = self.get_project_state()
     
     def _rename_execution_item(self, node_id: str):
         """Handle rename request from execution list."""
@@ -741,16 +818,14 @@ class ExecutionPanel(QWidget):
                 widget = self.node_list.itemWidget(item)
                 if widget:
                     current_name = self.current_session.get_node_name(node_id)
-                    dialog = RenameDialog("Rename Execution Item", current_name, "Enter new name:", self)
-                    
+                    dialog = RenameDialog("Rename Execution Item", current_name, "Custom name (leave empty to clear):", self)
                     if dialog.exec() == QDialog.Accepted:
                         new_name = dialog.get_name()
-                        if new_name and new_name != current_name:
+                        if new_name != current_name:
                             self.current_session.set_node_name(node_id, new_name)
                             widget.custom_name = new_name
                             widget.update_display_text()
                             self._sync_to_graph()
-                            print(f"[Execution] Renamed item to: {new_name}")
                 break
     
     def _on_item_order_changed(self):
@@ -838,6 +913,69 @@ class ExecutionPanel(QWidget):
                 self._refresh_node_list()
                 self._sync_to_graph()
             
+    def eventFilter(self, obj, event):
+        if not self._eyedropper_active:
+            return False
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self._cancel_eyedropper()
+            return True
+        if event.type() == QEvent.MouseButtonPress:
+            if self._scene and self._scene.views():
+                from gui.items.node import NodeItem
+                view = self._scene.views()[0]
+                # items() takes viewport coordinates — event.pos() is in viewport coords
+                hit = next(
+                    (i for i in view.items(event.pos()) if isinstance(i, NodeItem)),
+                    None
+                )
+                if hit is not None:
+                    self._finish_eyedropper(hit.node.id)
+                else:
+                    self._cancel_eyedropper()
+            return True
+        return False
+
+    def _start_eyedropper(self, target_node_id: str):
+        self._eyedropper_active = True
+        self._eyedropper_target_id = target_node_id
+        if self._scene and self._scene.views():
+            vp = self._scene.views()[0].viewport()
+            vp.setCursor(Qt.CrossCursor)
+            vp.installEventFilter(self)
+        log.info("[Replace] Click a node to replace — Escape to cancel")
+
+    def _cancel_eyedropper(self):
+        self._eyedropper_active = False
+        self._eyedropper_target_id = None
+        if self._scene and self._scene.views():
+            vp = self._scene.views()[0].viewport()
+            vp.unsetCursor()
+            vp.removeEventFilter(self)
+        log.info("[Replace] Cancelled")
+
+    def _finish_eyedropper(self, new_node_id: str):
+        old_node_id = self._eyedropper_target_id
+        self._eyedropper_active = False
+        self._eyedropper_target_id = None
+        if self._scene and self._scene.views():
+            vp = self._scene.views()[0].viewport()
+            vp.unsetCursor()
+            vp.removeEventFilter(self)
+
+        if not self.current_session or old_node_id not in self.current_session.node_ids:
+            return
+        idx = self.current_session.node_ids.index(old_node_id)
+        self.current_session.node_ids[idx] = new_node_id
+        custom_name = self.current_session.node_names.pop(old_node_id, "")
+        if custom_name:
+            self.current_session.node_names[new_node_id] = custom_name
+
+        new_node = self.graph.nodes.get(new_node_id) if self.graph else None
+        log.info(f"[Replace] Target replaced with: {new_node.title if new_node else new_node_id}")
+        self._refresh_node_list()
+        self._sync_to_graph()
+
     def _execute_current(self):
         if not self.current_session or not self.graph:
             return
@@ -867,113 +1005,145 @@ class ExecutionPanel(QWidget):
     def _execute_session(self, session: ExecutionSession):
         print(f"--- Executing: {session.name} ---")
         self.execution_started.emit(session.name)
-        
+
         if not session.node_ids:
             print("No nodes in session")
             return
-            
+
         start_total = time.perf_counter()
         original_vars = copy.deepcopy(self.graph.variables)
+        any_failed = False
+
         try:
-            # Collect all nodes including dependencies
-            all_node_ids = self._collect_with_deps(session.node_ids)
-            
-            # Sort by execution order (dependencies first)
-            sorted_ids = self._sort_by_deps(all_node_ids)
-            
-            # Clear previous execution times
-            for nid in sorted_ids:
+            # Clear previous error highlights
+            for i in range(self.node_list.count()):
+                list_item = self.node_list.item(i)
+                if list_item:
+                    w = self.node_list.itemWidget(list_item)
+                    if w:
+                        w.set_error_highlight(False)
+
+            engine = StandardExecutionEngine()
+            # Successful results shared across items (cache deps that already ran OK)
+            global_ok: dict[str, ExecutionResult] = {}
+            session.results = {}
+
+            def on_error(nid, msg):
                 node = self.graph.nodes.get(nid)
-                if node:
-                    node.last_execution_time = None
-            
-            # Validate
-            errors = []
-            for node_id in sorted_ids:
-                node = self.graph.nodes.get(node_id)
-                if node:
-                    err = node.validate()
-                    if err:
-                        errors.append(err)
-                        
-            if errors:
-                msg = f"Validation Error: {errors[0]}"
-                if len(errors) > 1:
-                    msg += f" (and {len(errors)-1} more)"
-                print(msg)
-                if self._scene and self._scene.views():
-                    self._scene.views()[0].show_notification(msg, is_error=True)
-                return
-            
-            # Execute each node in dependency order
-            self._execute_nodes(session, sorted_ids)
-                    
+                log.error(f"[{node.title if node else nid}] {msg}")
+                if self._scene:
+                    scene_item = self._scene._node_items.get(nid)
+                    if scene_item:
+                        scene_item.update()
+
+            context = ExecutionContext(on_node_error=on_error)
+
+            for session_item_id in session.node_ids:
+                item_node = self.graph.nodes.get(session_item_id)
+                if item_node is None:
+                    continue
+
+                # Collect and sort this item's full dependency subtree
+                item_deps = self._collect_with_deps([session_item_id])
+                sorted_deps = self._sort_by_deps(item_deps)
+
+                # Reset execution times for nodes not yet cached from a previous item
+                for dep_id in sorted_deps:
+                    if dep_id not in global_ok:
+                        dep_node = self.graph.nodes.get(dep_id)
+                        if dep_node:
+                            dep_node.last_execution_time = None
+
+                # Execute subtree, stopping at first failure
+                item_results = dict(global_ok)
+                failed_dep: str | None = None
+
+                for dep_id in sorted_deps:
+                    if dep_id in item_results:
+                        continue  # already succeeded for a previous item
+                    res = engine.execute_node(dep_id, self.graph, context, item_results)
+                    item_results[dep_id] = res
+                    if not res.success:
+                        failed_dep = dep_id
+                        break  # stop this item's subtree
+
+                if failed_dep is not None:
+                    any_failed = True
+                    self._failed_session_items.add(session_item_id)
+                    self._highlight_failed_item(session_item_id)
+                    dep_node = self.graph.nodes.get(failed_dep)
+                    dep_title = dep_node.title if dep_node else failed_dep
+                    log.error(f"[{item_node.title}] Execution failed (caused by: {dep_title})")
+                else:
+                    # Promote this item's results to the global cache
+                    for k, v in item_results.items():
+                        global_ok.setdefault(k, v)
+                    # Log this item's outputs
+                    item_result = item_results.get(session_item_id)
+                    if item_result:
+                        session.results[session_item_id] = item_result.outputs
+                        for out_name, out_val in item_result.outputs.items():
+                            print(f"[{item_node.title}] {out_name}: {out_val}")
+
             end_total = time.perf_counter()
             total_time = end_total - start_total
-            unit = self.graph.time_unit
+            unit = getattr(self.graph, 'time_unit', 'ms')
             disp_time = total_time * 1000 if unit == "ms" else total_time
-            msg = f"Execution complete in {disp_time:.4f}{unit}"
+            msg = (f"Execution complete with errors in {disp_time:.4f}{unit}"
+                   if any_failed else
+                   f"Execution complete in {disp_time:.4f}{unit}")
             print(msg)
             if self._scene and self._scene.views():
-                self._scene.views()[0].show_notification(msg)
+                self._scene.views()[0].show_notification(msg, is_error=any_failed)
 
             self.execution_finished.emit(session.name, session.results)
             print(f"--- {session.name} complete ---")
+
         except Exception as e:
-            msg = f"Execution Error: {str(e)}"
-            print(msg)
+            log.error(f"Execution Error: {e}")
             if self._scene and self._scene.views():
-                self._scene.views()[0].show_notification(msg, is_error=True)
+                self._scene.views()[0].show_notification(f"Execution Error: {e}", is_error=True)
         finally:
             self.graph.variables.clear()
             self.graph.variables.update(original_vars)
             self.refresh()
-            
-    def _execute_nodes(self, session: ExecutionSession, node_ids: list[str]):
-        """Execute a list of nodes in order."""
-        engine = StandardExecutionEngine()
-        checked_ids = self.node_list.get_checked_items()
-        
-        # Internal tracking to bridge engine results and session results
-        engine_results: dict[str, ExecutionResult] = {}
-        session.results = {}
-
-        def on_complete(nid, result_obj):
-            # Store in session for backward compatibility
-            session.results[nid] = result_obj.outputs
-            
-            # Log to console if this node was in the original session and checked
-            if nid in session.node_ids and nid in checked_ids:
-                node = self.graph.nodes.get(nid)
-                if node:
-                    for out_name, out_val in result_obj.outputs.items():
-                        print(f"[{node.title}] {out_name}: {out_val}")
-
-        def on_error(nid, msg):
-            node = self.graph.nodes.get(nid)
-            print(f"[{node.title if node else nid}] Error: {msg}")
-
-        context = ExecutionContext(
-            on_node_complete=on_complete,
-            on_node_error=on_error
-        )
-        
-        for node_id in node_ids:
-            res = engine.execute_node(node_id, self.graph, context, engine_results)
-            engine_results[node_id] = res
+            for failed_id in self._failed_session_items:
+                self._highlight_failed_item(failed_id)
+            self._failed_session_items.clear()
+            if self._scene:
+                self._scene.update()
+            try:
+                from PySide6.QtWidgets import QApplication
+                for w in QApplication.topLevelWidgets():
+                    if hasattr(w, 'panel_manager'):
+                        gmp = w.panel_manager.get_panel("GraphMapDock")
+                        if gmp and hasattr(gmp, 'update_execution_errors'):
+                            gmp.update_execution_errors()
+                        break
+            except Exception:
+                pass
                 
+    def _highlight_failed_item(self, node_id: str):
+        for i in range(self.node_list.count()):
+            item = self.node_list.item(i)
+            if item and item.data(Qt.UserRole) == node_id:
+                widget = self.node_list.itemWidget(item)
+                if widget:
+                    widget.set_error_highlight(True)
+                break
+
     def _collect_with_deps(self, node_ids: list[str]) -> set[str]:
-        """Collect all nodes including dependencies."""
-        result = set(node_ids)
+        """Collect all nodes including dependencies, skipping stale IDs."""
+        result = {nid for nid in node_ids if nid in self.graph.nodes}
         for node_id in list(result):
             self._add_deps_recursive(node_id, result)
         return result
-        
+
     def _add_deps_recursive(self, node_id: str, collected: set[str]):
         """Recursively add dependency nodes."""
         for conn in self.graph.connections:
             if conn.dst_node == node_id:
-                if conn.src_node not in collected:
+                if conn.src_node not in collected and conn.src_node in self.graph.nodes:
                     collected.add(conn.src_node)
                     self._add_deps_recursive(conn.src_node, collected)
 
@@ -993,13 +1163,11 @@ class ExecutionPanel(QWidget):
         in_degree = {nid: 0 for nid in node_ids}
         deps = {nid: [] for nid in node_ids}
         
-        # 1. Connection-based dependencies
         for conn in self.graph.connections:
             if conn.dst_node in node_ids and conn.src_node in node_ids:
                 deps[conn.src_node].append(conn.dst_node)
                 in_degree[conn.dst_node] += 1
 
-        # 2. Resource-based dependencies (Implicit variable dependencies)
         resource_writers: dict[str, list[str]] = {}
         for nid in node_ids:
             node = self.graph.nodes.get(nid)

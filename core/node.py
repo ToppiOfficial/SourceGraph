@@ -53,6 +53,10 @@ class Port:
     is_dynamic: bool = False
     display_in_inspector: bool = True
     editable: bool = True
+    full_row: bool = False
+    below_ports: bool = False
+    row_height: int | None = None
+    row_stretch: bool = False
 
     enum_options: list[str] | None = None
     enum_filter: list[str] | None = None
@@ -134,6 +138,8 @@ class BaseNode:
     locked_title: bool = False
     allow_folding: bool = True
     
+    default_width: int | None = None
+
     dynamic_input_prefix: str | None = None
     dynamic_output_prefix: str | None = None
     
@@ -165,11 +171,6 @@ class BaseNode:
         # GUI self-registration system
         self._gui_builders: dict[str, callable] = {}
         self._gui_builders_registered = False
-        
-        # Custom GUI properties for layout control
-        self._custom_widget_height = 0
-        self._custom_widget_below_ports = False
-        self._custom_widget_full_width = False
 
         self._build_ports_from_schema()
         self._register_gui_builders()
@@ -222,6 +223,10 @@ class BaseNode:
         label = config.get("label", "")
         is_dynamic = config.get("dynamic", False)
         allow_connection = config.get("allow_connection", True)
+        full_row = config.get("full_row", False)
+        below_ports = config.get("below_ports", False)
+        row_height = config.get("row_height")
+        row_stretch = config.get("row_stretch", False)
         
         # Set default for boolean ports
         if port_type == PortType.BOOL and default is None:
@@ -248,6 +253,10 @@ class BaseNode:
         p.label = label
         p.is_dynamic = is_dynamic
         p.allow_connection = allow_connection
+        p.full_row = full_row
+        p.below_ports = below_ports
+        p.row_height = row_height
+        p.row_stretch = row_stretch
         
         # Set enum options if provided
         if enum_options is not None:
@@ -637,14 +646,6 @@ class BaseNode:
             node.on_property_changed()
         return node
 
-    def configure_custom_widget(self, height: int = 0, below_ports: bool = False, full_width: bool = False):
-        """
-        Configure how custom widgets should be handled by the UI.
-        """
-        self._custom_widget_height = height
-        self._custom_widget_below_ports = below_ports
-        self._custom_widget_full_width = full_width
-
     # GUI Self-Registration System
     def _register_gui_builders(self) -> None:
         """Register GUI builders for this node. Override in subclasses."""
@@ -659,22 +660,13 @@ class BaseNode:
     def has_gui_builder(self, port_name: str) -> bool:
         return port_name in self._gui_builders
     
-    def create_widget_for_port(self, port, parent=None):
-        """
-        Create a widget for a port. Override in subclasses for custom widgets.
-        
-        Args:
-            port: The port to create a widget for
-            parent: Parent widget
-            
-        Returns:
-            QWidget or None if no custom widget
+    def create_widget_for_port(self, port):
+        """Return a QWidget for this port, or None to use the default widget.
+
+        Override in subclasses for fully custom widgets, or use
+        register_gui_builder() to register per-port builder functions.
         """
         builder = self.get_gui_builder(port.name)
         if builder:
-            return builder(port, parent)
-        
-        if hasattr(self, 'create_custom_widget'):
-            return self.create_custom_widget(port, parent)
-        
+            return builder(port)
         return None
