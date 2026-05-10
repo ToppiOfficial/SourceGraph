@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 from core.node import BaseNode, PortType, any_in, string_in, float_in, int_in, Out
 
 class ConverterNode:
@@ -149,3 +150,53 @@ class PathNormalizeNode(ConverterNode, BaseNode):
         if not path:
             return ("",)
         return (os.path.normpath(str(path)).replace("\\", "/"),)
+
+class StringSplitNode(ConverterNode, BaseNode):
+    """Splits a string into a list using a specified separator."""
+    title = "String Split"
+
+    text = string_in(default="")
+    separator = string_in(default=",")
+    list_out = Out("ARRAY")
+
+    def execute(self, text: str, separator: str, **kwargs):
+        if not text:
+            return ([],)
+        if not separator:
+            return (text.split(),)
+        return (text.split(separator),)
+
+class RegexMatchNode(ConverterNode, BaseNode):
+    """Finds all occurrences of a regex pattern in a string."""
+    title = "Regex Match"
+
+    text = string_in(default="")
+    pattern = string_in(default="")
+    matches = Out("ARRAY")
+
+    def execute(self, text: str, pattern: str, **kwargs):
+        if not pattern or not text:
+            return ([],)
+        try:
+            res = re.findall(pattern, text)
+            return (res,)
+        except re.error:
+            return ([],)
+
+class RegexReplaceNode(ConverterNode, BaseNode):
+    """Replaces occurrences of a regex pattern with a replacement string."""
+    title = "Regex Replace"
+
+    text = string_in(default="")
+    pattern = string_in(default="")
+    replacement = string_in(default="")
+    text_out = Out("STRING")
+
+    def execute(self, text: str, pattern: str, replacement: str, **kwargs):
+        if not pattern:
+            return (text,)
+        try:
+            res = re.sub(pattern, replacement, text)
+            return (res,)
+        except re.error:
+            return (text,)

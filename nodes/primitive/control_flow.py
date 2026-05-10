@@ -1,5 +1,6 @@
 from __future__ import annotations
-from core.node import BaseNode, any_in, bool_in, string_in, DynIn, Out
+from typing import Any
+from core.node import BaseNode, In, any_in, bool_in, string_in, DynIn, Out
 
 
 class IfElseNode(BaseNode):
@@ -46,21 +47,38 @@ class FormulaIfNode(BaseNode):
 
 
 class CaseNode(BaseNode):
-    """Selects an output based on an index or selector value."""
+    """
+    Selects a value from an input array based on which dynamic case input matches the selector.
+    Case 1 matches array index 0, Case 2 matches index 1, etc.
+    """
     title = "Switch Case"
     CATEGORY = "Conditional"
     color = "#ffb86c"
 
+    values = In("ARRAY")
     selector = any_in()
     default = any_in()
-    option = DynIn(prefix="option")
+    case = DynIn("*", prefix="case", editable=False)
     result = Out("*")
 
-    def execute(self, selector, default=None, **kwargs):
-        # Try to match by index
-        target_key = f"option{selector}"
-        if target_key in kwargs:
-            return (kwargs[target_key],)
+    def execute(self, values: list, selector: Any, default: Any = None, **kwargs):
+        if not isinstance(values, (list, tuple)):
+            return (default,)
+
+        i = 1
+        while True:
+            case_key = f"case{i}"
+            if case_key not in kwargs:
+                break
+            
+            if kwargs[case_key] == selector:
+                idx = i - 1
+                if 0 <= idx < len(values):
+                    return (values[idx],)
+                break
+            
+            i += 1
+            
         return (default,)
 
 
