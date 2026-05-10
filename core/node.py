@@ -4,7 +4,7 @@ import uuid
 import json
 import copy
 from typing import Any, TYPE_CHECKING
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 if TYPE_CHECKING:
@@ -61,6 +61,7 @@ class Port:
     enum_filter: list[str] | None = None
     required: bool = False
     graph_enum: str | None = None
+    number_increment: float | None = None
 
     def can_connect_to(self, other: Port) -> bool:
         if self.is_input == other.is_input:
@@ -154,6 +155,7 @@ class PortSpec:
         enum_options: list | None = None,
         enum_filter: list | None = None,
         graph_enum: str | None = None,
+        step: float | None = None,
     ) -> None:
         self.type_str = type_str
         cfg: dict[str, Any] = {}
@@ -169,6 +171,7 @@ class PortSpec:
         if enum_options is not None:     cfg["enum_options"] = enum_options
         if enum_filter is not None:      cfg["enum_filter"] = enum_filter
         if graph_enum is not None:       cfg["graph_enum"] = graph_enum
+        if step is not None:             cfg["step"] = step
         self._cfg = cfg
 
     def as_tuple(self) -> tuple:
@@ -423,6 +426,7 @@ class BaseNode:
         below_ports = config.get("below_ports", False)
         row_height = config.get("row_height")
         row_stretch = config.get("row_stretch", False)
+        number_increment = config.get("step")
         
         # Set default for boolean ports
         if port_type == PortType.BOOL and default is None:
@@ -452,6 +456,7 @@ class BaseNode:
         p.below_ports = below_ports
         p.row_height = row_height
         p.row_stretch = row_stretch
+        p.number_increment = number_increment
         
         # Set enum options if provided
         if enum_options is not None:

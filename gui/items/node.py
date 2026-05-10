@@ -1,15 +1,15 @@
 from __future__ import annotations
+import os
+from typing import Any
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget, 
-                                QHBoxLayout, QVBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem, QLabel, QPushButton)
-from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath, QLinearGradient)
-from PySide6.QtCore    import Qt, QRectF, QPointF, QSizeF, QRect
+                                QHBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem)
+from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath)
+from PySide6.QtCore    import Qt, QRectF, QPointF
 
 from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables
 from gui.theme import *
-from gui.items.wire import ConnectionItem
 from gui.widgets.basic_shapes import ShapeDrawer
-
-import os
+import math as _math
 
 # -- Layout constants -----------------------------------------------------------
 DEFAULT_W = 180
@@ -18,7 +18,7 @@ ROW_H     = 26   # height per port row
 PR        = 6    # port radius
 PAD       = 8    # inner horizontal padding
 MIN_W     = 120
-LBL_W_MIN = 60   # minimum px reserved for a port label
+LABEL_MAXSPACE_GAP = 40
 
 # Input types that get an inline editable widget when unconnected.
 _EDITABLE = {PortType.ANY, PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM, PortType.FILE}
@@ -28,7 +28,6 @@ def _elide(s: str, n: int = 25) -> str:
 
 
 # -- Folded node arc geometry --------------------------------------------------
-import math as _math
 
 _ARC_R    = 20.0   # radius of the port fan arc (px)
 _ARC_STEP = 24.0   # degrees between adjacent ports
@@ -229,6 +228,10 @@ class NodeItem(QGraphicsItem):
         # Height saved before folding so unfolding restores user-resized dimensions.
         self._unfolded_height: float | None = None
 
+        # Resets any nodes that have a big of space through either external factor or old versions.
+        if self.node.label_width is not None and self.node.label_width > LABEL_MAXSPACE_GAP:
+            self.node.label_width = None
+
         self._build()
         self._update_ports()
         self._layout_rows = self.layout_row_signature()
@@ -241,17 +244,7 @@ class NodeItem(QGraphicsItem):
             self.handle.setVisible(False)
 
     def on_handle_moved(self, pos: QPointF) -> None:
-        # Scale label_width proportionally with a reduced rate and delayed threshold
-        old_w = self._w
-        new_w = pos.x()
-        
-        if new_w > DEFAULT_W + 40:
-            delta_w = (new_w - old_w) * 0.5
-            new_lbl_w = (self.node.label_width or LBL_W_MIN) + delta_w
-        else:
-            new_lbl_w = self.node.label_width or LBL_W_MIN
-            
-        self.resize_to(new_w, pos.y(), new_lbl_w)
+        self.resize_to(pos.x(), pos.y())
 
     def _get_fold_indicator_rect(self) -> QRectF:
         """Get the clickable area for the fold indicator."""
@@ -270,10 +263,10 @@ class NodeItem(QGraphicsItem):
             self._h = max(self._calculate_height(), h)
             self.node.height = self._h
         if lbl_w is not None:
-            self.node.label_width = max(LBL_W_MIN, lbl_w)
-        else:
-            if self.node.label_width is None:
-                self.node.label_width = LBL_W_MIN
+            # Only set if it's a manual override (significantly different from ideal)
+            ideal = self._calculate_ideal_label_width()
+            if abs(lbl_w - ideal) > 2.0:
+                self.node.label_width = max(20, lbl_w)
             
         self._update_ports()
         self.handle.setPos(self._w, self._h)
@@ -317,6 +310,31 @@ class NodeItem(QGraphicsItem):
                 h += ROW_H
         h += below_extra
         return max(h, TITLE_H + ROW_H) + PAD
+
+    def _calculate_ideal_label_width(self) -> float:
+        """Calculate the width needed for the longest visible input label."""
+        if hasattr(self, "_cached_ideal_lbl_w"):
+            return self._cached_ideal_lbl_w
+            
+        from PySide6.QtGui import QFontMetrics
+        metrics = QFontMetrics(QFont("Segoe UI", 8))
+        max_w = 0
+        for name, port in self.node.inputs.items():
+            is_editable = port.port_type in _EDITABLE and port.editable
+            has_custom = self.node.has_gui_builder(name)
+            full_row = getattr(port, 'full_row', False)
+            if not (is_editable or has_custom or full_row or port.allow_connection):
+                continue
+            if full_row:
+                continue
+            
+            display = port.label or name
+            w = metrics.horizontalAdvance(display)
+            if w > max_w:
+                max_w = w
+        
+        self._cached_ideal_lbl_w = max(LABEL_MAXSPACE_GAP, max_w)
+        return self._cached_ideal_lbl_w
 
     def layout_row_signature(self) -> tuple[tuple[str, str], ...]:
         """Rows that participate in layout; used to detect port/widget structure drift."""
@@ -471,7 +489,7 @@ class NodeItem(QGraphicsItem):
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
         from PySide6.QtWidgets import QLineEdit, QComboBox, QPushButton
-        from gui.theme import NODE_WIDGET_STYLE, NODE_BOOL_STYLE, NODE_COMBO_STYLE
+        from gui.theme import NODE_WIDGET_STYLE, NODE_BOOL_STYLE
         
         if port.port_type == PortType.BOOL:
             toggle = QPushButton(parent)
@@ -482,31 +500,64 @@ class NodeItem(QGraphicsItem):
             return toggle
             
         elif port.port_type == PortType.ENUM or port.enum_options is not None:
-            # Dropdown/selection
-            combo = QComboBox(parent)
-            combo.setStyleSheet(NODE_COMBO_STYLE)
+            # Search-based button instead of clunky dropdown
+            btn = QPushButton(parent)
+            btn.setFixedHeight(22)
+            btn.setStyleSheet(NODE_ENUM_BTN_STYLE)
             
-            # Populate options
-            if port.enum_options is not None:
-                for opt in port.enum_options:
-                    combo.addItem(str(opt), opt)
-            elif self.node.graph:
-                # Dynamic enum: populate from graph assets or variables
-                if port_uses_graph_variables(port):
-                    self._populate_variable_combo(combo, port)
-                else:
-                    self._populate_asset_combo(combo, port)
+            v = port.value
+            btn.setText(_elide(str(v) if v is not None else "Select...", 25))
+            btn.setProperty("widget_type", "enum")
             
-            # Set current value
-            raw = port.value
-            val_str = str(raw).lower() if isinstance(raw, bool) else (str(raw) if raw is not None else "")
-            idx = combo.findData(val_str)
-            if idx < 0:
-                idx = combo.findText(val_str)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+            return btn
             
-            return combo
+        elif port.port_type in (PortType.INT, PortType.FLOAT):
+            # Container for +/- buttons
+            container = QWidget(parent)
+            container.setFixedHeight(22)
+            container.setObjectName("NumberInputContainer")
+            container.setStyleSheet(f"""
+                #NumberInputContainer {{
+                    background-color: {BG_DARK};
+                    border: 1px solid {BORDER_LIGHT};
+                    border-radius: 3px;
+                }}
+            """)
+            
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            
+            btn_minus = QPushButton("-", container)
+            btn_minus.setFixedSize(20, 20)
+            btn_minus.setStyleSheet(NODE_NUMBER_BTN_STYLE)
+            btn_minus.setFocusPolicy(Qt.NoFocus)
+            
+            edit = QLineEdit(container)
+            edit.setFixedHeight(20)
+            edit.setStyleSheet("QLineEdit { background: transparent; border: none; font-size: 11px; padding: 0px; }")
+            edit.setAlignment(Qt.AlignCenter)
+            
+            v = port.value
+            val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
+            edit.setText(val_str)
+            edit.setProperty("original_val", port.value)
+            
+            btn_plus = QPushButton("+", container)
+            btn_plus.setFixedSize(20, 20)
+            btn_plus.setStyleSheet(NODE_NUMBER_BTN_STYLE)
+            btn_plus.setFocusPolicy(Qt.NoFocus)
+            
+            layout.addWidget(btn_minus)
+            layout.addWidget(edit)
+            layout.addWidget(btn_plus)
+            
+            container.setProperty("widget_type", "number")
+            container.number_edit = edit
+            container.btn_minus = btn_minus
+            container.btn_plus = btn_plus
+            
+            return container
             
         else:
             # Text input for STRING, INT, FLOAT, FILE, ANY
@@ -523,7 +574,7 @@ class NodeItem(QGraphicsItem):
 
     def _create_proxy(self, container: QWidget, current_y: float) -> QGraphicsProxyWidget:
         """Helper to finalize proxy placement."""
-        lbl_w = self.node.label_width or LBL_W_MIN
+        lbl_w = self.node.label_width or self._calculate_ideal_label_width()
         x_pos = PR + PAD + lbl_w + 2
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(container)
@@ -705,6 +756,14 @@ class NodeItem(QGraphicsItem):
                 widget.setText(val_str)
                 widget.setProperty("original_val", port.value)
         
+        elif widget.property("widget_type") == "number":
+            edit = widget.number_edit
+            v = port.value
+            val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
+            if edit.text() != val_str:
+                edit.setText(val_str)
+                edit.setProperty("original_val", port.value)
+        
         elif isinstance(widget, QComboBox):
             # Handle combo box updates
             widget.blockSignals(True)
@@ -718,10 +777,13 @@ class NodeItem(QGraphicsItem):
             widget.blockSignals(False)
         
         elif isinstance(widget, QPushButton):
-            # Handle boolean toggle updates
+            # Handle boolean toggle and enum button updates
             raw = port.value
-            is_true = str(raw).lower() in ("true", "1", "yes")
-            widget.setText(f"< {'True' if is_true else 'False'} >")
+            if widget.property("widget_type") == "enum":
+                widget.setText(_elide(str(raw) if raw is not None else "Select...", 25))
+            else:
+                is_true = str(raw).lower() in ("true", "1", "yes")
+                widget.setText(f"< {'True' if is_true else 'False'} >")
 
     def _connect_widget_events(self, name: str, widget: QWidget):
         """Connect widget events to handle value changes."""
@@ -736,6 +798,27 @@ class NodeItem(QGraphicsItem):
             widget.editingFinished.connect(
                 lambda: self._on_edit_finished(name, widget)
             )
+        elif widget.property("widget_type") == "number":
+            edit = widget.number_edit
+            # Real-time feedback (non-undoable)
+            edit.textChanged.connect(
+                lambda text: self._on_widget_changed(name, text)
+            )
+            # Finalized state (undoable)
+            edit.editingFinished.connect(
+                lambda: self._on_edit_finished(name, edit)
+            )
+            # Buttons
+            widget.btn_minus.clicked.connect(
+                lambda: self._on_number_increment(name, -1)
+            )
+            widget.btn_plus.clicked.connect(
+                lambda: self._on_number_increment(name, 1)
+            )
+        elif widget.property("widget_type") == "enum":
+            widget.clicked.connect(
+                lambda: self._on_enum_clicked(name)
+            )
         elif isinstance(widget, QComboBox):
             widget.currentIndexChanged.connect(
                 lambda index: self._on_combo_changed(name, widget)
@@ -744,6 +827,56 @@ class NodeItem(QGraphicsItem):
             widget.clicked.connect(
                 lambda: self._on_bool_toggle(name)
             )
+    
+    def _on_enum_clicked(self, port_name: str):
+        """Show selection dialog for ENUM ports."""
+        port = self.node.inputs.get(port_name)
+        if not port:
+            return
+            
+        options = []
+        if port.enum_options is not None:
+            options = [str(o) for o in port.enum_options]
+        elif self.node.graph:
+            if port_uses_graph_variables(port):
+                options = sorted(list(self.node.graph.variables.keys()))
+            else:
+                # Assets
+                assets = getattr(self.node.graph, "assets", [])
+                ext_filter = port.enum_filter
+                if ext_filter:
+                    options = [f for f in assets if os.path.splitext(f)[1].lower() in ext_filter]
+                else:
+                    options = assets
+        
+        # Open dialog
+        from gui.menu.file_search_dialog import GenericSelectionDialog, FileSearchDialog
+        
+        # For asset ports, use specialized file search dialog if filter exists
+        if port.enum_filter and not port.enum_options:
+            from PySide6.QtWidgets import QApplication
+            from gui.main_window import MainWindow
+            mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
+            dialog = FileSearchDialog(parent=mw, file_filter=port.enum_filter, title=port.label or port_name)
+            if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
+                self._update_port_value(port_name, dialog.selected_file)
+        else:
+            from PySide6.QtWidgets import QApplication
+            from gui.main_window import MainWindow
+            mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
+            dialog = GenericSelectionDialog(options, parent=mw, title=port.label or port_name)
+            if dialog.exec() == GenericSelectionDialog.Accepted and dialog.selected_item:
+                self._update_port_value(port_name, dialog.selected_item)
+
+    def _update_port_value(self, port_name: str, new_val: Any):
+        """Push a property change command for the given port."""
+        port = self.node.inputs.get(port_name)
+        if not port or port.value == new_val:
+            return
+        sc = self.scene()
+        if sc:
+            from gui.node_editor import PropertyCommand
+            sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
     
     def _on_widget_changed(self, port_name: str, new_value: str):
         """Handle widget value changes."""
@@ -786,8 +919,39 @@ class NodeItem(QGraphicsItem):
             from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
+    def _on_number_increment(self, port_name: str, direction: int):
+        """Handle numeric increment/decrement buttons."""
+        port = self.node.inputs.get(port_name)
+        if not port:
+            return
+        
+        old_val = port.value
+        try:
+            current = float(old_val or 0)
+        except (ValueError, TypeError):
+            current = 0.0
+            
+        step = port.number_increment
+        if step is None:
+            step = 1.0 if port.port_type == PortType.INT else 0.1
+            
+        new_val = current + (direction * step)
+        
+        if port.port_type == PortType.INT:
+            new_val = int(round(new_val))
+        else:
+            # Avoid floating point precision issues for small steps
+            new_val = round(new_val, 7)
+            
+        sc = self.scene()
+        if sc:
+            from gui.node_editor import PropertyCommand
+            sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
+
     def refresh_ports(self) -> None:
         """Full rebuild of port items and proxies (used after dynamic port changes)."""
+        if hasattr(self, "_cached_ideal_lbl_w"):
+            del self._cached_ideal_lbl_w
         self.prepareGeometryChange()
 
         for pi in self._port_items.values():
@@ -912,7 +1076,7 @@ class NodeItem(QGraphicsItem):
             if pi:
                 pi.setPos(self._w, pi.y())
 
-        lbl_w = self.node.label_width or LBL_W_MIN
+        lbl_w = self.node.label_width or self._calculate_ideal_label_width()
         stretch_proxies: list[tuple[float, str, QGraphicsProxyWidget]] = []
 
         for name, proxy in self._proxies.items():
@@ -1133,7 +1297,7 @@ class NodeItem(QGraphicsItem):
             )
             visible_out_idx += 1
 
-        lbl_w = self.node.label_width or LBL_W_MIN
+        lbl_w = self.node.label_width or self._calculate_ideal_label_width()
         row_offset_y = TITLE_H + visible_out_idx * ROW_H
         for name, port in self.node.inputs.items():
             is_editable = port.port_type in _EDITABLE and port.editable
@@ -1164,7 +1328,7 @@ class NodeItem(QGraphicsItem):
             painter.drawText(
                 QRectF(PR + PAD, row_offset_y, lbl_w, ROW_H),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                _elide(port.label or name, int(lbl_w / 6)),
+                port.label or name,
             )
             # When connected: show the live value text on the right (proxy is hidden)
             if is_editable and not below_flag:

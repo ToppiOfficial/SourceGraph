@@ -271,7 +271,7 @@ class BaseBrowserWidget(QWidget):
         raise NotImplementedError()
 
     def refresh(self):
-        if self._is_rebuilding or not self.main_window.graph:
+        if self._is_rebuilding or self._is_syncing or not self.main_window.graph:
             return
         self._do_refresh()
 

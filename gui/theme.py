@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QPainterPath
-from PySide6.QtCore import Qt, QPoint
-from gui.widgets.basic_shapes import ShapeDrawer
+from PySide6.QtGui import QIcon
 from gui.widgets.icon_provider import load_icon
 BG_DARK             = "#1a1a1a"
 BG_DARKER           = "#111111"
@@ -183,61 +181,6 @@ QDialog {{
 }}
 """
 
-SEARCH_STYLE = f"""
-QLineEdit {{
-    background: {BG_DARK};
-    color: {FG_BRIGHT};
-    border: 1px solid {BORDER_LIGHT};
-    border-radius: 4px;
-    padding: 8px 12px;
-    font-size: 12px;
-    font-family: {FONT_UI};
-}}
-QLineEdit:focus {{
-    border: 2px solid {ACCENT};
-    background: {BG_DARKER};
-}}
-"""
-
-LIST_STYLE = f"""
-QListWidget {{
-    background: {BG_DARK};
-    border: 1px solid {BORDER_MED};
-    border-radius: 4px;
-    outline: none;
-    font-size: 11px;
-    font-family: {FONT_UI};
-}}
-QListWidget::item {{
-    padding: 6px 8px;
-    border-bottom: 1px solid transparent;
-    color: {FG_MAIN};
-}}
-QListWidget::item:selected {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                stop:0 {BG_SELECTED}, stop:1 {BG_HOVER}); 
-    color: {FG_BRIGHT};
-    border-left: 3px solid {ACCENT};
-}}
-QListWidget::item:hover {{
-    background: {BG_HOVER};
-}}
-QScrollBar:vertical {{
-    background: {BG_MED};
-    width: 6px;
-    border: none;
-    border-radius: 3px;
-}}
-QScrollBar::handle:vertical {{
-    background: {BG_SURFACE};
-    border-radius: 3px;
-    min-height: 15px;
-}}
-QScrollBar::handle:vertical:hover {{
-    background: {BG_HOVER};
-}}
-"""
-
 SEARCH_BAR_STYLE = f"""
 QLineEdit {{
     background: {BG_DARK};
@@ -318,24 +261,6 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background: {BG_HOVER};
 }}
-"""
-
-CATEGORY_HEADER_STYLE = f"""
-QLabel {{
-    color: {ACCENT};
-    font-weight: bold;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    padding: 4px 8px;
-    background: transparent;
-}}
-"""
-
-TAB_STYLE = f"""
-QTabWidget::pane {{ border: 1px solid {BORDER_DARK}; background: {BG_BASE}; }}
-QTabBar::tab {{ background: {BG_SURFACE}; color: {FG_DIM}; padding: 6px 12px; }}
-QTabBar::tab:selected {{ background: {BG_BASE}; color: {FG_BRIGHT}; border-bottom: 2px solid {ACCENT}; }}
 """
 
 HISTORY_STYLE = f"""
@@ -426,30 +351,37 @@ QPushButton:hover {{
 }}
 """
 
-NODE_COMBO_STYLE = f"""
-QComboBox {{
+NODE_NUMBER_BTN_STYLE = f"""
+QPushButton {{
+    background-color: transparent;
+    color: {FG_DIM};
+    border: none;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 0px;
+    min-width: 16px;
+}}
+QPushButton:hover {{
+    color: {FG_BRIGHT};
+}}
+QPushButton:pressed {{
+    color: {ACCENT};
+}}
+"""
+
+NODE_ENUM_BTN_STYLE = f"""
+QPushButton {{
     background-color: {BG_DARK};
     color: {FG_BRIGHT};
     border: 1px solid {BORDER_LIGHT};
     border-radius: 3px;
-    padding: 2px 4px;
+    padding: 2px 8px;
     font-size: 11px;
+    text-align: left;
 }}
-QComboBox:focus {{
-    border: 1px solid {ACCENT};
-}}
-QComboBox::drop-down {{
-    border: none;
-    width: 0px;
-}}
-QComboBox::down-arrow {{
-    image: none;
-}}
-QComboBox QAbstractItemView {{
-    background-color: {BG_SURFACE};
-    border: 1px solid {BORDER_DARK};
-    color: {FG_MAIN};
-    selection-background-color: {BG_SELECTED};
+QPushButton:hover {{
+    background-color: {BG_HOVER};
+    border-color: {ACCENT};
 }}
 """
 

@@ -13,7 +13,7 @@ class ModelNode(BaseNode):
     color = "#2a5a3a"
 
     name      = string_in(default="studio")
-    mesh_file = In("FILE", enum_filter=[".dmx", ".smd"])
+    mesh_file = In("FILE", enum_filter=[".dmx", ".smd"], editable=False)
     params    = DynIn("COMMAND", prefix="param")
     command   = Out("COMMAND")
 
@@ -53,7 +53,7 @@ class EyelidNode(BaseNode):
     CATEGORY = MODEL_PARAMETER_CATEGORY
 
     name           = string_in(default="upper_right")
-    vta_file       = In("FILE", enum_filter=[".vta", ".smd"])
+    vta_file       = In("FILE", enum_filter=[".vta"],  editable=False)
     lowerer_frame  = int_in(default=0)
     lowerer_height = float_in(default=-0.1)
     neutral_frame  = int_in(default=0)
@@ -81,7 +81,7 @@ class DMXEyelidNode(BaseNode):
     CATEGORY = MODEL_PARAMETER_CATEGORY
 
     lid           = enum_in(["upper", "lower"])
-    dmx_file      = In("FILE", enum_filter=[".dmx"])
+    dmx_file      = In("FILE", enum_filter=[".dmx"], editable=False)
     lowerer_delta = float_in(default=0.0)
     lowerer_pos   = float_in(default=-0.25)
     neutral_delta = float_in(default=0.0)

@@ -465,6 +465,77 @@ class SubgraphSearchDialog(_AssetSearchBase):
 
 # ── SessionSearchDialog ───────────────────────────────────────────────────────
 
+class GenericSelectionDialog(QDialog):
+    """Generic search dialog for selecting from a list of strings."""
+
+    def __init__(self, items: list[str], parent=None, title="Select Item"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setFixedSize(300, 400)
+        self.setStyleSheet(ENHANCED_MENU_STYLE)
+        self.selected_item: str | None = None
+        self._items = items
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(f"Search {title}...")
+        self.search_edit.setStyleSheet(SEARCH_BAR_STYLE)
+        layout.addWidget(self.search_edit)
+
+        self.item_list = QListWidget()
+        self.item_list.setStyleSheet(NODE_LIST_STYLE)
+        self.item_list.itemClicked.connect(self.accept)
+        layout.addWidget(self.item_list)
+
+        self._refresh(self._items)
+        self.search_edit.textChanged.connect(self._on_search)
+        self.search_edit.returnPressed.connect(self._on_enter)
+        self.search_edit.setFocus()
+
+    def _on_search(self, text: str):
+        t = text.lower()
+        self._refresh([s for s in self._items if t in s.lower()] if t else self._items)
+
+    def _refresh(self, items: list[str]):
+        self.item_list.clear()
+        for s in items:
+            item = QListWidgetItem(s)
+            item.setSizeHint(QSize(0, 40))
+            self.item_list.addItem(item)
+        if self.item_list.count():
+            self.item_list.setCurrentRow(0)
+
+    def _on_enter(self):
+        if self.item_list.currentItem():
+            self.accept()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        elif event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown):
+            self.item_list.setFocus()
+            super().keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)
+
+    def accept(self):
+        item = self.item_list.currentItem()
+        if item:
+            self.selected_item = item.text()
+        super().accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        sr = self.screen().availableGeometry()
+        x = max(sr.left() + 10, min(self.x(), sr.right() - self.width() - 10))
+        y = max(sr.top() + 10, min(self.y(), sr.bottom() - self.height() - 10))
+        if x != self.x() or y != self.y():
+            self.move(x, y)
+
+
 class SessionSearchDialog(QDialog):
     """Popup dialog listing execution sessions from the current graph."""
 

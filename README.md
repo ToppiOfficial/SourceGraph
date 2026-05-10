@@ -25,6 +25,7 @@
 - **Real-time Execution:** Execute graphs with a dedicated engine and context management.
 - **Rich GUI:** Includes an Inspector, History (Undo/Redo), Graph Map, Console, and specialized browsers for variables and assets.
 - **Undo/Redo Support:** Integrated undo manager for all graph operations.
+- **Inspirations:** Many features are inspired by Valve's Source2 Animgraph node tool and popular node-based interfaces like ComfyUI (LiteGraph).
 
 ## Requirements
 
