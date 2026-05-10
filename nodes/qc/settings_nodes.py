@@ -1,4 +1,4 @@
-from core.node import BaseNode
+from core.node import BaseNode, int_in, Out
 from nodes.qc.shared_categories import RENDER_SETTING_CATEGORY
 
 class MaxVerts(BaseNode):
@@ -7,17 +7,10 @@ class MaxVerts(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "limit": ("INT", {"default": 65536}),
-                "clamp": ("INT", {"default": 65536}),
-            }
-        }
+    limit = int_in(default=65536)
+    clamp = int_in(default=65536)
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, limit: int, clamp: int, **kwargs):
         return (f'$maxverts {limit} {clamp}',)
@@ -29,12 +22,7 @@ class MostlyOpaque(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         return ('$mostlyopaque',)
@@ -46,12 +34,7 @@ class Opaque(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         return ('$opaque',)
@@ -63,12 +46,7 @@ class AmbientBoost(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         return ('$ambientboost',)
@@ -80,12 +58,7 @@ class StaticProp(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         return ('$staticprop',)

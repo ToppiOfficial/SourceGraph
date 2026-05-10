@@ -21,7 +21,6 @@ from gui.logger import log
 from PySide6.QtGui import QColor
 from gui.theme import *
 from gui.theme import (
-    get_execution_icon,
     EXEC_ITEM_CHECKBOX_STYLE,
     EXEC_ITEM_TEXT_LABEL_STYLE,
     EXEC_ITEM_ORDER_LABEL_STYLE,
@@ -46,14 +45,6 @@ class ExecutionItemWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(6)
-        
-        # Execution icon
-        self.icon_label = QLabel()
-        execution_icon = get_execution_icon(14)
-        self.icon_label.setPixmap(execution_icon.pixmap(14, 14))
-        self.icon_label.setFixedSize(14, 14)
-        self.icon_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.icon_label)
         
         # Checkbox for enabling/disabling execution of this item
         self.checkbox = QCheckBox()

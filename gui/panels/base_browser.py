@@ -10,8 +10,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QRect
 from PySide6.QtGui import QAction, QColor, QFont
 
-from gui.theme import BTN_STYLE, MENU, FG_DIM, FG_BRIGHT, get_folder_icon
+from gui.theme import BTN_STYLE, MENU, FG_DIM, FG_BRIGHT
 from gui.widgets.basic_shapes import ShapeDrawer
+from gui.widgets.icon_provider import load_icon
 from gui.dialogs import RenameDialog
 
 
@@ -130,7 +131,7 @@ class BaseBrowserTree(QTreeWidget):
         item = QTreeWidgetItem(self if parent is None else parent)
         item.setData(0, self._T, "folder")
         item.setText(0, name)
-        item.setIcon(0, get_folder_icon())
+        item.setIcon(0, load_icon("folder", color="#63c2df"))
         font = QFont()
         font.setBold(True)
         item.setFont(0, font)

@@ -223,5 +223,6 @@ crash/
 .claude
 claude.md
 _testcases/
+icons/*.psd
 workspace/autosave.json
 config/recent_nodes.json

@@ -77,6 +77,9 @@ class StandardExecutionEngine:
             validation_error = node.validate()
             if validation_error:
                 raise ValueError(node.error_msg)
+            
+            original_input_values = {k: p.value for k, p in node.inputs.items()}
+            original_output_values = {k: p.value for k, p in node.outputs.items()}
 
             # Gather input values from connected nodes
             connected = {
@@ -159,6 +162,12 @@ class StandardExecutionEngine:
                 raise
             return result_obj
 
+        finally:
+            for k, v in original_input_values.items():
+                node.inputs[k].value = v
+            for k, v in original_output_values.items():
+                node.outputs[k].value = v
+                
     def execute(self, graph: Any, context: ExecutionContext) -> dict[str, ExecutionResult]:
         results: dict[str, ExecutionResult] = {}
         

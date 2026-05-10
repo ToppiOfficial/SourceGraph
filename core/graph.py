@@ -110,6 +110,7 @@ class Graph:
             scene._undo_manager.notify_immediate(description)
 
     def add_node(self, node: BaseNode) -> None:
+        node.graph = self
         self.nodes[node.id] = node
         self._notify()
 

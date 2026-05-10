@@ -87,12 +87,11 @@ def remove_registration_hook(callback: Callable[[type[BaseNode]], None]) -> None
 def _auto_discover_nodes():
     """Dynamically scan subdirectories in the 'nodes' folder."""
     global NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, NODE_CATEGORIES
-    
-    manually_registered = set(NODE_CLASS_MAPPINGS.keys())
+
     NODE_CATEGORIES.clear()
-    
+
     base_path = os.path.dirname(__file__)
-    
+
     for entry in os.scandir(base_path):
         if entry.is_dir() and not entry.name.startswith("__"):
             for file in os.scandir(entry.path):
@@ -100,28 +99,18 @@ def _auto_discover_nodes():
                     module_name = f"nodes.{entry.name}.{file.name[:-3]}"
                     try:
                         module = importlib.import_module(module_name)
-                        
-                        if hasattr(module, 'NODE_CLASS_MAPPINGS'):
-                            for name, obj in module.NODE_CLASS_MAPPINGS.items():
-                                if (inspect.isclass(obj) and 
-                                    issubclass(obj, BaseNode) and 
-                                    obj is not BaseNode):
-                                    if name not in manually_registered:
-                                        if not hasattr(obj, 'CATEGORY'):
-                                            obj.CATEGORY = entry.name.title()
-                                        register_node(obj)
-                        
+
                         for name, obj in inspect.getmembers(module):
-                            if (inspect.isclass(obj) and 
-                                issubclass(obj, BaseNode) and 
+                            if (inspect.isclass(obj) and
+                                issubclass(obj, BaseNode) and
                                 obj is not BaseNode and
                                 obj.__module__ == module.__name__ and
                                 obj.__name__ not in NODE_CLASS_MAPPINGS):
-                                
+
                                 if not hasattr(obj, 'CATEGORY'):
                                     obj.CATEGORY = entry.name.title()
                                 register_node(obj)
-                                
+
                     except Exception as e:
                         print(f"[Node Registration] Failed to load module {module_name}: {e}")
 

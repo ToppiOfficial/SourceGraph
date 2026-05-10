@@ -1,4 +1,4 @@
-from core.node import BaseNode
+from core.node import BaseNode, string_in, float_in, file_in, Out
 from nodes.qc.shared_categories import QC_CATEGORY
 
 class SequenceNode(BaseNode):
@@ -7,21 +7,11 @@ class SequenceNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "name": ("STRING", {"default": "animation"}),
-                "animation_file": ("FILE", {}),
-                "fps": ("FLOAT", {"default": 30.0}),
-            },
-            "hidden": {
-                "_preview": "BOOL",
-            }
-        }
+    name = string_in(default="animation")
+    animation_file = file_in()
+    fps = float_in(default=30.0)
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, name: str, animation_file: str, fps: float, _preview: bool = False, **kwargs):
         path = self.validate_file_input(animation_file, must_exist=not _preview)

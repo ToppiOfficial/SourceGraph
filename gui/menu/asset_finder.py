@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from gui.theme import (
     BTN_STYLE, TREE_STYLE, BG_MED, BG_DARK, FG_DIM, FG_MAIN, BORDER_DARK,
-    COLOR_VALID, COLOR_INVALID,
+    COLOR_VALID, COLOR_INVALID, load_file_icon,
 )
 
 _DIALOG_STYLE = f"""
@@ -74,6 +74,7 @@ class AssetFinderDialog(QDialog):
         found = 0
         for orig, res in self.resolved_paths.items():
             item = QTreeWidgetItem([orig, res or "Missing"])
+            item.setIcon(0, load_file_icon(orig))
             if res:
                 found += 1
                 item.setForeground(1, QColor(COLOR_VALID))

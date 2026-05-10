@@ -5,6 +5,7 @@ import os
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QPainterPath
 from PySide6.QtCore import Qt, QPoint
 from gui.widgets.basic_shapes import ShapeDrawer
+from gui.widgets.icon_provider import load_icon
 BG_DARK             = "#1a1a1a"
 BG_DARKER           = "#111111"
 BG_MED              = "#252525"
@@ -576,125 +577,42 @@ QLineEdit {{
 }}
 """
 
-# -- Icon Creation Functions ---------------------------------------------------
-
-def get_folder_icon(size: int = 16) -> QIcon:
-    """Create a folder icon with appropriate colors."""
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    # Use a folder-like color
-    painter.setBrush(QColor("#63c2df"))  # ACCENT color
-    painter.setPen(Qt.NoPen)
-    
-    ShapeDrawer.draw_folder(painter, 0, 0, size)
-    painter.end()
-    return QIcon(px)
-
-def get_file_icon(size: int = 16, letter: str = "A", is_image: bool = False) -> QIcon:
-    """Create a file icon with a letter for readable files."""
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    if is_image:
-        # Light blue for image files
-        painter.setBrush(QColor("#87CEEB"))  # Sky blue
-        painter.setPen(QColor("#4682B4"))  # Steel blue for outline
-    else:
-        # White for other readable files
-        painter.setBrush(QColor("#FFFFFF"))  # White
-        painter.setPen(QColor("#CCCCCC"))  # Light grey for outline
-    
-    ShapeDrawer.draw_file_with_letter(painter, 0, 0, size, letter)
-    painter.end()
-    return QIcon(px)
-
-def get_blank_file_icon(size: int = 16) -> QIcon:
-    """Create a blank file icon for unreadable/binary files."""
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    # Use lighter grey for binary/unreadable files
-    painter.setBrush(QColor("#808080"))  # Lighter grey
-    painter.setPen(QColor("#606060"))  # Medium grey for outline
-    
-    ShapeDrawer.draw_file(painter, 0, 0, size)
-    painter.end()
-    return QIcon(px)
-
-def is_image_file(file_path: str) -> bool:
-    """Check if file is an image based on extension."""
-    image_extensions = {'.jpg', '.jpeg', '.png', '.tga', '.dds', '.bmp', '.tiff', '.tif', '.gif', '.webp', '.exr', '.hdr'}
-    return os.path.splitext(file_path)[1].lower() in image_extensions
-
-def get_bookmark_icon(size: int = 16) -> QIcon:
-    """Create a simple bookmark icon."""
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    # Use accent color for the bookmark
-    painter.setBrush(QColor(ACCENT))
-    painter.setPen(Qt.NoPen)  # No outline
-    
-    # Draw bookmark shape using QPainterPath
-    margin = size // 8  # Keep original margin
-    tag_height = size // 3
-    width_reduction = size // 6  # How much to reduce width on each side
-    
-    # Create custom path for bookmark shape
-    path = QPainterPath()
-    path.moveTo(margin + width_reduction, margin)  # Top-left (moved right)
-    path.lineTo(size - margin - width_reduction, margin)  # Top-right (moved left)
-    path.lineTo(size - margin - width_reduction, size - margin - tag_height)  # Right before tag
-    path.lineTo(size // 2, size - margin)  # Bottom point (center)
-    path.lineTo(margin + width_reduction, size - margin - tag_height)  # Left before tag
-    path.closeSubpath()
-    
-    painter.drawPath(path)
-    
-    painter.end()
-    return QIcon(px)
+# -- File Type Colors ----------------------------------------------------------
+# Extension → icon tint color. Edit here to affect all panels.
+FILE_TYPE_COLORS: dict[str, str] = {
+    # QC / model source
+    ".qc":   "#f4a261",
+    ".smd":  "#5ba4cf",
+    ".dmx":  "#74b3ce",
+    ".mdl":  "#7ec8e3",
+    ".dx90": "#7ec8e3",
+    # Textures
+    ".vtf":  "#c77dff",
+    ".tga":  "#c77dff",
+    ".png":  "#c77dff",
+    ".jpg":  "#c77dff",
+    ".jpeg": "#c77dff",
+    ".bmp":  "#c77dff",
+    # Materials
+    ".vmt":  "#b5838d",
+    ".mat":  "#b5838d",
+    # Audio
+    ".wav":  "#52b788",
+    ".mp3":  "#52b788",
+    ".ogg":  "#52b788",
+    # Data / config
+    ".json": "#ffd166",
+    ".cfg":  "#ffd166",
+    ".txt":  "#adb5bd",
+    ".srcgraph":  "#1ada4a",
+    ".srcsubgraph":  "#69ec8a",
+    # Fallback
+    "":      "#adb5bd",
+}
 
 
-def get_execution_icon(size: int = 16) -> QIcon:
-    """Create an execution icon representing node execution."""
-    px = QPixmap(size, size)
-    px.fill(Qt.transparent)
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing)
-    
-    # Use accent color for execution icon
-    painter.setBrush(QColor(ACCENT))
-    painter.setPen(QColor(ACCENT))
-    
-    ShapeDrawer.draw_execution(painter, 0, 0, size)
-    painter.end()
-    return QIcon(px)
-
-
-def is_file_readable(file_path: str) -> bool:
-    """Check if a file is readable (text-based) or binary."""
-    try:
-        with open(file_path, 'rb') as f:
-            # Read first 1024 bytes to check for non-ASCII content
-            # Check if there are any null bytes or too many non-ASCII characters
-            # Count non-ASCII printable characters
-            # If more than 30% non-ASCII, consider it binary
-
-            chunk = f.read(1024)
-            if b'\x00' in chunk:
-                return False
-
-            non_ascii = sum(1 for byte in chunk if byte > 127)      
-            return non_ascii / len(chunk) < 0.3
-            
-    except (IOError, OSError):
-        return False
+def load_file_icon(path: str) -> QIcon:
+    """Return a tinted file QIcon for *path* based on its extension."""
+    ext = os.path.splitext(path)[1].lower()
+    color = FILE_TYPE_COLORS.get(ext, FILE_TYPE_COLORS[""])
+    return load_icon("file",color=color)

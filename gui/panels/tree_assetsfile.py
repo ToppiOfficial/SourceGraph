@@ -83,15 +83,7 @@ class AssetTreeWidget(BaseBrowserTree):
         item.setToolTip(1, f"Type: {ext}\nPath: {path}")
         item.setToolTip(2, path)
 
-        if os.path.exists(path):
-            if is_file_readable(path):
-                letter = name[0].upper() if name else "A"
-                is_image = is_image_file(path)
-                item.setIcon(0, get_file_icon(letter=letter, is_image=is_image))
-            else:
-                item.setIcon(0, get_blank_file_icon())
-        else:
-            item.setIcon(0, get_blank_file_icon())
+        item.setIcon(0, load_file_icon(path))
 
         item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
         return item
@@ -294,11 +286,7 @@ class AssetBrowserWidget(BaseBrowserWidget):
                 item.setToolTip(0, f"Name: {name}\nPath: {new_path}\nType: {ext}")
                 item.setToolTip(1, f"Type: {ext}\nPath: {new_path}")
                 item.setToolTip(2, new_path)
-                if os.path.exists(new_path) and is_file_readable(new_path):
-                    letter = name[0].upper() if name else "A"
-                    item.setIcon(0, get_file_icon(letter=letter, is_image=is_image_file(new_path)))
-                else:
-                    item.setIcon(0, get_blank_file_icon())
+                item.setIcon(0, load_file_icon(new_path))
             # Remap port values on any node that references a resolved path
             scene = self.main_window.scene
             for node in self.main_window.graph.nodes.values():

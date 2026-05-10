@@ -228,28 +228,6 @@ class ShapeDrawer:
         painter.drawEllipse(center_x - link_height // 2, right_y, link_height, link_width)
 
     @staticmethod
-    def draw_warning(painter: QPainter, x: int, y: int, size: int = 16):
-        """Draw a warning triangle icon."""
-        margin = size // 8
-        # Draw triangle
-        points = [
-            QPoint(x + size // 2, y + margin),
-            QPoint(x + size - margin, y + size - margin),
-            QPoint(x + margin, y + size - margin),
-        ]
-        painter.drawPolygon(points)
-        
-        # Draw exclamation mark
-        thickness = max(1, size // 8)
-        center_x = x + size // 2
-        center_y = y + size // 2
-        
-        # Vertical line of exclamation
-        painter.drawRect(center_x - thickness // 2, center_y - size // 4, thickness, size // 4)
-        # Dot of exclamation
-        painter.drawRect(center_x - thickness, center_y + size // 6, thickness * 2, thickness * 2)
-
-    @staticmethod
     def draw_map(painter: QPainter, x: int, y: int, size: int = 16):
         """Draw a map/minimap icon."""
         margin = size // 8
@@ -313,84 +291,6 @@ class ShapeDrawer:
         painter.drawEllipse(x + size - margin - node_radius * 2, center_y - node_radius, node_radius * 2, node_radius * 2)
 
 
-    @staticmethod
-    def draw_folder(painter: QPainter, x: int, y: int, size: int = 16):
-        """Draw a folder icon."""
-        margin = size // 8
-        tab_height = size // 4
-        tab_width = size // 3
-        
-        # Folder back (main body)
-        painter.drawRect(x + margin, y + tab_height, size - 2 * margin, size - tab_height - margin)
-        
-        # Folder tab
-        painter.drawRect(x + margin, y + margin, tab_width, tab_height)
-        
-        # Optional: add a small line to show folder depth
-        line_y = y + tab_height + (size - tab_height - margin) // 2
-        painter.drawLine(x + margin + 2, line_y, x + size - margin - 2, line_y)
-
-
-    @staticmethod
-    def draw_file(painter: QPainter, x: int, y: int, size: int = 16):
-        """Draw a basic file icon with portrait orientation."""
-        margin = size // 10
-        fold_width = size // 5
-        fold_height = size // 6
-        
-        # Make it more portrait-oriented
-        file_width = size * 3 // 4
-        file_height = size
-        offset_x = x + (size - file_width) // 2
-        
-        # Main file body (portrait rectangle)
-        painter.drawRect(offset_x + margin, y + margin, file_width - 2 * margin, file_height - 2 * margin)
-        
-        # Folded corner (top-right)
-        fold_path = QPainterPath()
-        fold_path.moveTo(offset_x + file_width - margin - fold_width, y + margin)
-        fold_path.lineTo(offset_x + file_width - margin, y + margin)
-        fold_path.lineTo(offset_x + file_width - margin, y + margin + fold_height)
-        fold_path.lineTo(offset_x + file_width - margin - fold_width, y + margin + fold_height)
-        fold_path.closeSubpath()
-        painter.fillPath(fold_path, painter.brush())
-    
-    @staticmethod
-    def draw_file_with_letter(painter: QPainter, x: int, y: int, size: int = 16, letter: str = "A"):
-        """Draw a file icon with a letter inside."""
-        ShapeDrawer.draw_file(painter, x, y, size)
-        
-        # Draw letter
-        font = painter.font()
-        font.setBold(True)
-        font_size = max(6, size // 3)
-        font.setPixelSize(font_size)
-        painter.setFont(font)
-        
-        # Set text color to contrast with file background
-        painter.setPen(QColor(255, 255, 255))  # White text
-        
-        # Center the letter
-        text_rect = painter.boundingRect(x, y, size, size, Qt.AlignCenter, letter)
-        text_x = x + (size - text_rect.width()) // 2
-        text_y = y + (size - text_rect.height()) // 2 + text_rect.height() - 2
-        painter.drawText(text_x, text_y, letter)
-    
-    @staticmethod
-    def draw_blank_file(painter: QPainter, x: int, y: int, size: int = 16):
-        """Draw a blank/empty file icon."""
-        # Draw file outline with no fill
-        original_brush = painter.brush()
-        painter.setBrush(Qt.NoBrush)
-        ShapeDrawer.draw_file(painter, x, y, size)
-        
-        # Add some dots to indicate empty/binary content
-        painter.setBrush(original_brush)
-        dot_size = max(1, size // 16)
-        for i in range(3):
-            dot_x = x + size // 3 + i * (size // 6)
-            dot_y = y + size // 2
-            painter.drawEllipse(dot_x, dot_y, dot_size, dot_size)
 
 
 class IconColors:

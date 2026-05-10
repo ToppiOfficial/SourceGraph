@@ -19,6 +19,7 @@ from nodes import NODE_CLASS_MAPPINGS
 from gui.theme import *
 from gui.logger import log, Level
 from gui.widgets.basic_shapes import ShapeDrawer, IconColors
+from gui.widgets.icon_provider import load_icon
 
 
 def create_icon(shape_func, color=IconColors.DEFAULT, size=16) -> QIcon:
@@ -30,12 +31,7 @@ def create_icon(shape_func, color=IconColors.DEFAULT, size=16) -> QIcon:
     painter.setRenderHint(QPainter.Antialiasing)
     painter.setPen(color)
     
-    # Use filled brush for warning icons to make them more visible
-    if shape_func == ShapeDrawer.draw_warning:
-        painter.setBrush(color)
-    else:
-        painter.setBrush(Qt.NoBrush)
-    
+    painter.setBrush(Qt.NoBrush)
     shape_func(painter, 0, 0, size)
     
     painter.end()
@@ -402,7 +398,7 @@ class MainWindow(QMainWindow):
         ctrl_layout.addWidget(self.minimap_links_btn)
         
         self.minimap_errors_btn = QPushButton()
-        self.minimap_errors_btn.setIcon(create_icon(ShapeDrawer.draw_warning, IconColors.DELETE, 14))
+        self.minimap_errors_btn.setIcon(load_icon("warning", color=COLOR_ERROR))
         self.minimap_errors_btn.setCheckable(True)
         self.minimap_errors_btn.setChecked(True)
         self.minimap_errors_btn.setToolTip("Toggle Error State in Minimap")

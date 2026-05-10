@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from core.node import BaseNode, Port, PortType, parse_type
+from core.node import BaseNode, Port, PortType, parse_type, file_in, string_in, Out, In
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
 from nodes import NODE_CLASS_MAPPINGS
 
@@ -16,20 +16,7 @@ class SubgraphNode(BaseNode):
     body_color = "#142933"
     locked_title = True
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "graph_path": ("FILE", {
-                    "default": "",
-                    "allow_connection": False,
-                    "full_row": True,
-                    "enum_filter": [".srcsubgraph"],
-                }),
-            }
-        }
-
-    RETURN_TYPES = ()  # Dynamic outputs based on subgraph
+    graph_path = file_in(filter=[".srcsubgraph"], full_row=True, default="")
 
     def on_property_changed(self):
         path = self.inputs.get("graph_path", {}).value if "graph_path" in self.inputs else ""
@@ -41,9 +28,7 @@ class SubgraphNode(BaseNode):
         if not path:
             return
 
-        full_path = path
-        if not os.path.isabs(path) and self.graph and self.graph.project_dir:
-            full_path = os.path.normpath(os.path.join(self.graph.project_dir, path))
+        full_path = self.resolve_path(path)
 
         if not os.path.exists(full_path):
             return
@@ -155,26 +140,9 @@ class SubgraphNode(BaseNode):
     def create_widget_for_port(self, port):
         if port.name != "graph_path":
             return None
-
-        from PySide6.QtWidgets import QPushButton, QHBoxLayout, QWidget, QLabel
-        from gui.theme import BTN_STYLE
-
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        from gui.theme import NODE_FILE_LABEL_STYLE
-        self._subgraph_label = QLabel(os.path.basename(port.value) if port.value else "Select subgraph…")
-        self._subgraph_label.setStyleSheet(NODE_FILE_LABEL_STYLE)
-        layout.addWidget(self._subgraph_label, 1)
-
-        browse_btn = QPushButton("...")
-        browse_btn.setFixedWidth(24)
-        browse_btn.setStyleSheet(BTN_STYLE)
-        browse_btn.clicked.connect(self._show_subgraph_dialog)
-        layout.addWidget(browse_btn)
-
+        from gui.widgets.node_widgets import make_file_picker
+        label_text = os.path.basename(port.value) if port.value else "Select subgraph…"
+        container, self._subgraph_label = make_file_picker(label_text, self._show_subgraph_dialog)
         self._graph_path_port = port
         return container
     
@@ -215,9 +183,7 @@ class SubgraphNode(BaseNode):
                     item.refresh_ports()
 
     def execute(self, graph_path: str, **kwargs):
-        path = graph_path
-        if path and not os.path.isabs(path) and self.graph and self.graph.project_dir:
-            path = os.path.normpath(os.path.join(self.graph.project_dir, path))
+        path = self.resolve_path(graph_path)
 
         if not path or not os.path.exists(path):
             return {}
@@ -269,16 +235,8 @@ class SubgraphInputNode(BaseNode):
     color = "#28a1e7"
     body_color = "#142933"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "port_name": ("STRING", {"default": "input", "visible": False}),
-            }
-        }
-
-    RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("value",)
+    port_name = string_in(default="input", display_in_inspector=False)
+    value = Out("*")
 
     def __init__(self):
         super().__init__()
@@ -295,18 +253,12 @@ class SubgraphOutputNode(BaseNode):
     color = "#28a1e7"
     body_color = "#142933"
 
+    port_name = string_in(default="output", display_in_inspector=False)
+    value = In("*")
+
     def __init__(self):
         super().__init__()
         self._captured_value = None
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "port_name": ("STRING", {"default": "output", "visible": False}),
-                "value": ("*", {}),
-            }
-        }
 
     def execute(self, port_name: str, value, **kwargs):
         # SubgraphOutputNode captures the value for SubgraphNode to read

@@ -739,6 +739,17 @@ class NodeEditorScene(QGraphicsScene):
             self._node_items.pop(nid, None)
             self.removeItem(item)
 
+            # sync_dynamic_ports() may have rematerialised ConnectionItems for this node
+            # during the loop above; those are not in `dead` and must be cleaned up now.
+            stale = [(c, ci) for c, ci in self._conn_items
+                     if c.src_node == nid or c.dst_node == nid]
+            for c, ci in stale:
+                try:
+                    self.removeItem(ci)
+                except RuntimeError:
+                    pass
+                self._conn_items.remove((c, ci))
+
     def _delete_conn(self, ci: ConnectionItem, push_undo: bool = True) -> None:
         for pair in list(self._conn_items):
             conn, item = pair
@@ -1394,6 +1405,21 @@ class NodeEditorView(SafeGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        # Check if focus is on a widget or if scene has a focused item (QGraphicsProxyWidget)
+        focus_widget = QApplication.focusWidget()
+        scene_focused = self.scene().focusItem() is not None
+        is_editing = (focus_widget is not None and focus_widget is not self) or scene_focused
+
+        # If editing in another widget or scene item, deselect nodes and skip all node shortcuts except F5
+        if is_editing:
+            self.scene().clearSelection()
+            if event.key() != Qt.Key_F5:
+                # Only handle F5 (compile) even when editing; let everything else pass through
+                super().keyPressEvent(event)
+                return
+
         if event.key() == Qt.Key_A and (event.modifiers() & Qt.ShiftModifier):
             pos = QCursor.pos()
             dlg = NodeSearchDialog(None)
@@ -1402,7 +1428,7 @@ class NodeEditorView(SafeGraphicsView):
             if dlg.exec() and dlg.selected_class:
                 new_node = dlg.selected_class()
                 self.scene().add_node(new_node, self.mapToScene(self.mapFromGlobal(pos)))
-                
+
                 self.scene().clearSelection()
                 item = self.scene()._node_items.get(new_node.id)
                 if item:

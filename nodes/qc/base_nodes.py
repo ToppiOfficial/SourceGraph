@@ -1,5 +1,6 @@
-from core.node import BaseNode
+from core.node import BaseNode, In, DynIn, Out, string_in, any_out, command_out, dyn_in
 from nodes.qc.shared_categories import QC_CATEGORY
+
 
 class ModelNameNode(BaseNode):
     """Generates $modelname QC command."""
@@ -7,16 +8,8 @@ class ModelNameNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model_path": ("STRING", {"default": "models/mymodel/model.mdl"}),
-            }
-        }
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    model_path = string_in(default="models/mymodel/model.mdl", full_row=True)
+    command    = Out("COMMAND")
 
     def execute(self, model_path: str, **kwargs):
         return (f'$modelname "{model_path}"',)
@@ -28,16 +21,8 @@ class CDMaterialsNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "path": ("STRING", {"default": "models/mymodel/"}),
-            }
-        }
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    path    = string_in(default="models/mymodel/")
+    command = Out("COMMAND")
 
     def execute(self, path: str, **kwargs):
         return (f'$cdmaterials "{path}"',)
@@ -50,23 +35,9 @@ class QCJoinNode(BaseNode):
     color = "#7a2d2d"
     body_color = "#2b1010"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "command{n}": ("*", {"dynamic": True, "editable": False}),
-            }
-        }
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    cmds    = DynIn("*", prefix="command", editable=False)
+    command = Out("COMMAND")
 
     def execute(self, **kwargs):
-        lines = []
-        for k, v in kwargs.items():
-            if k.startswith("command") and k[7:].isdigit() and v:
-                if isinstance(v, dict) and "command" in v:
-                    lines.append(str(v["command"]))
-                else:
-                    lines.append(str(v))
-        return ("\n".join(lines),)
+        parts = self.collect_dynamic("command", kwargs)
+        return ("\n".join(str(p) for p in parts if p),)

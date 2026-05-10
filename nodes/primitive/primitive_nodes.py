@@ -1,121 +1,73 @@
 from __future__ import annotations
-from core.node import BaseNode
+from core.node import (
+    BaseNode, In, OptIn, Out, DynIn,
+    string_in, int_in, float_in, bool_in, any_in, dyn_in,
+    string_out, int_out, float_out, bool_out, array_out, any_out,
+)
 
 
-class PrimitiveNode:
-    CATEGORY = "Primitives"
-    def execute(self, value, **kwargs):
-        self._value = value
-        return (value,)
-    
-    def get_value(self): return None
-
-
-class StringNode(PrimitiveNode, BaseNode):
+class StringNode(BaseNode):
     title = "String"
+    CATEGORY = "Primitives"
     color = "#4ec9b0"
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("out",)
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "value": ("STRING", {"default": "", "allow_connection": False}),
-            }
-        }
-    
-    def __init__(self):
-        super().__init__()
-        self._value = ""
-    
-    def get_value(self):
-        return self._value
-    
-    def on_property_changed(self):
-        value = self.inputs["value"].value if "value" in self.inputs else self._value
-        self.outputs["out"].label = str(value or "...")
-    
 
-class IntNode(PrimitiveNode, BaseNode):
+    value = OptIn("STRING", default="", allow_connection=False)
+    out   = Out("STRING")
+
+    def execute(self, value="", **kwargs):
+        return (value,)
+
+    def on_property_changed(self):
+        self.outputs["out"].label = str(self.inputs["value"].value or "...")
+
+
+class IntNode(BaseNode):
     title = "Integer"
+    CATEGORY = "Primitives"
     color = "#569cd6"
-    RETURN_TYPES = ("INT",)
-    RETURN_NAMES = ("out",)
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "value": ("INT", {"default": 0, "allow_connection": False}),
-            }
-        }
-    
-    def __init__(self):
-        super().__init__()
-        self._value = 0
-    
-    def get_value(self):
-        return self._value
-    
+
+    value = In("INT", default=0, allow_connection=False)
+    out   = Out("INT")
+
+    def execute(self, value=0, **kwargs):
+        return (value,)
+
     def on_property_changed(self):
-        value = self.inputs["value"].value if "value" in self.inputs else self._value
-        self.outputs["out"].label = str(value)
-    
-    
-class FloatNode(PrimitiveNode, BaseNode):
+        self.outputs["out"].label = str(self.inputs["value"].value)
+
+
+class FloatNode(BaseNode):
     title = "Float"
+    CATEGORY = "Primitives"
     color = "#9cdcfe"
-    RETURN_TYPES = ("FLOAT",)
-    RETURN_NAMES = ("out",)
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "value": ("FLOAT", {"default": 0.0, "allow_connection": False}),
-            }
-        }
-    
-    def __init__(self):
-        super().__init__()
-        self._value = 0.0
-    
-    def get_value(self):
-        return self._value
-    
+
+    value = In("FLOAT", default=0.0, allow_connection=False)
+    out   = Out("FLOAT")
+
+    def execute(self, value=0.0, **kwargs):
+        return (value,)
+
     def on_property_changed(self):
-        value = self.inputs["value"].value if "value" in self.inputs else self._value
+        raw = self.inputs["value"].value
         try:
-            self.outputs["out"].label = f"{float(value):.2f}"
+            self.outputs["out"].label = f"{float(raw):.2f}"
         except (ValueError, TypeError):
-            self.outputs["out"].label = str(value)
-    
-    
-class BoolNode(PrimitiveNode, BaseNode):
+            self.outputs["out"].label = str(raw)
+
+
+class BoolNode(BaseNode):
     title = "Boolean"
+    CATEGORY = "Primitives"
     color = "#ff8c00"
-    RETURN_TYPES = ("BOOL",)
-    RETURN_NAMES = ("out",)
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "value": ("BOOL", {"default": False, "allow_connection": False}),
-            }
-        }
-    
-    def __init__(self):
-        super().__init__()
-        self._value = False
-    
-    def get_value(self):
-        return self._value
-    
+
+    value = In("BOOL", default=False, allow_connection=False)
+    out   = Out("BOOL")
+
+    def execute(self, value=False, **kwargs):
+        return (value,)
+
     def on_property_changed(self):
-        value = self.inputs["value"].value if "value" in self.inputs else self._value
-        self.outputs["out"].label = str(value).upper()
+        self.outputs["out"].label = str(self.inputs["value"].value).upper()
 
 
 class JoinToArrayNode(BaseNode):
@@ -123,23 +75,26 @@ class JoinToArrayNode(BaseNode):
     CATEGORY = "Primitives"
     color = "#44475a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "item{n}": ("*", {"dynamic": True}),
-            }
-        }
-
-    RETURN_TYPES = ("ARRAY",)
-    RETURN_NAMES = ("array",)
+    items = DynIn(prefix="item")
+    array = Out("ARRAY")
 
     def execute(self, **kwargs):
-        items = []
-        for k, v in kwargs.items():
-            if k.startswith("item") and k[4:].isdigit():
-                items.append(v)
-        return (items,)
+        return (self.collect_dynamic("item", kwargs),)
+
+
+class GetItemNode(BaseNode):
+    title = "Get Item"
+    CATEGORY = "Primitives"
+    color = "#44475a"
+
+    array = In("ARRAY")
+    index = In("INT", default=0)
+    item  = Out("*")
+
+    def execute(self, array: list, index: int = 0, **kwargs):
+        if isinstance(array, list) and 0 <= index < len(array):
+            return (array[index],)
+        return (None,)
 
 
 class PrintNode(BaseNode):
@@ -148,95 +103,43 @@ class PrintNode(BaseNode):
     color = "#6272a4"
     default_width = 200
 
+    value       = OptIn("*", full_row=True, row_height=100, row_stretch=True, below_ports=True)
+    passthrough = Out("*")
+
     def __init__(self):
         super().__init__()
-        self._output_buffer = []
+        self._output_buffer: list[str] = []
         self._max_lines = 512
-        self._display_widget = None
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "value": ("*", {"allow_connection": True, "full_row": True, "row_height": 100, "row_stretch": True}),
-            },
-        }
-
-    RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("passthrough",)
+        self._display_widgets: list = []  # track all live widgets, not just one
 
     @property
-    def output_text(self):
-        """Get the current output text for display."""
+    def output_text(self) -> str:
         return "\n".join(self._output_buffer[-self._max_lines:])
 
     def execute(self, value=None, **kwargs):
-        text = str(value) if value is not None else ""
-        print(text)
         self._output_buffer.clear()
-        self._output_buffer.append(text)
+        self._output_buffer.append(f"{value}")
+        self.sync_presentation()
         return (value,)
-    
+
     def sync_presentation(self) -> None:
-        """Override to trigger GUI updates when output text changes."""
-        if self._display_widget:
+        live = []
+        for w in self._display_widgets:
             try:
-                self._display_widget.setPlainText(self.output_text)
+                w.setPlainText(self.output_text)
+                live.append(w)
             except RuntimeError:
-                self._display_widget = None
-    
+                pass
+        self._display_widgets = live
+
     def _register_gui_builders(self) -> None:
-        """Register GUI builders for this node using the self-registration system."""
         super()._register_gui_builders()
-        
+
         def create_print_display(port):
-            from PySide6.QtWidgets import QTextEdit
-
-            display = QTextEdit()
-            display.setReadOnly(True)
-            display.setTabStopDistance(20)
-            display.setStyleSheet(f"""
-                QTextEdit {{
-                    background-color: #111111;
-                    color: #f0f0f0;
-                    border: 1px solid #444444;
-                    border-radius: 3px;
-                    padding: 4px;
-                    font-family: 'Consolas', 'Monaco', monospace;
-                    font-size: 10px;
-                }}
-                QTextEdit:focus {{
-                    border: 1px solid #63c2df;
-                }}
-            """)
-
-            self._display_widget = display
-            if hasattr(self, 'output_text'):
-                display.setPlainText(self.output_text)
+            from gui.widgets.node_widgets import make_text_display
+            display = make_text_display()
+            self._display_widgets.append(display)
+            display.setPlainText(self.output_text)
             return display
-        
+
         self.register_gui_builder("value", create_print_display)
-
-
-class GetItemNode(BaseNode):
-    title = "Get Item"
-    CATEGORY = "Primitives"
-    color = "#44475a"
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "array": ("ARRAY", {}),
-                "index": ("INT", {"default": 0}),
-            }
-        }
-
-    RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("item",)
-
-    def execute(self, array: list, index: int = 0, **kwargs):
-        if isinstance(array, list) and 0 <= index < len(array):
-            return (array[index],)
-        return (None,)
-

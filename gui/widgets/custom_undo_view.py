@@ -1,6 +1,3 @@
-"""
-Custom QUndoView with enhanced styling and functionality for beautified history display.
-"""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QSize, QRect

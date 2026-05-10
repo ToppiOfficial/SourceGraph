@@ -128,6 +128,203 @@ def get_type_config(type_spec: str | tuple) -> dict:
     return {}
 
 
+class PortSpec:
+    """Lightweight port declaration marker placed on BaseNode subclass bodies.
+
+    Collected by _collect_port_specs() during class creation and used to
+    auto-generate INPUT_TYPES / RETURN_TYPES. Instances are removed from
+    the class dict after collection so they don't shadow instance attrs.
+    """
+    _is_required: bool = True
+    _is_input:    bool = True
+
+    def __init__(
+        self,
+        type_str: str,
+        default: Any = None,
+        *,
+        label: str = "",
+        allow_connection: bool = True,
+        editable: bool = True,
+        display_in_inspector: bool = True,
+        full_row: bool = False,
+        below_ports: bool = False,
+        row_height: int | None = None,
+        row_stretch: bool = False,
+        enum_options: list | None = None,
+        enum_filter: list | None = None,
+        graph_enum: str | None = None,
+    ) -> None:
+        self.type_str = type_str
+        cfg: dict[str, Any] = {}
+        if default is not None:          cfg["default"] = default
+        if label:                        cfg["label"] = label
+        if not allow_connection:         cfg["allow_connection"] = False
+        if not editable:                 cfg["editable"] = False
+        if not display_in_inspector:     cfg["display_in_inspector"] = False
+        if full_row:                     cfg["full_row"] = True
+        if below_ports:                  cfg["below_ports"] = True
+        if row_height is not None:       cfg["row_height"] = row_height
+        if row_stretch:                  cfg["row_stretch"] = True
+        if enum_options is not None:     cfg["enum_options"] = enum_options
+        if enum_filter is not None:      cfg["enum_filter"] = enum_filter
+        if graph_enum is not None:       cfg["graph_enum"] = graph_enum
+        self._cfg = cfg
+
+    def as_tuple(self) -> tuple:
+        return (self.type_str, self._cfg)
+
+
+class In(PortSpec):
+    """Required input port declaration."""
+    _is_required = True
+    _is_input    = True
+
+
+class OptIn(PortSpec):
+    """Optional input port declaration."""
+    _is_required = False
+    _is_input    = True
+
+
+class DynIn(PortSpec):
+    """Dynamic (variable-count) optional input port.
+
+    By default the attribute name becomes the port prefix (e.g. ``items = DynIn()``
+    -> ports ``items1``, ``items2``, ...). Pass *prefix* to override the port prefix
+    independently of the Python attribute name.
+    """
+    _is_required = False
+    _is_input    = True
+
+    def __init__(self, type_str: str = "*", *, prefix: str | None = None, **kwargs: Any) -> None:
+        super().__init__(type_str, **kwargs)
+        self._cfg["dynamic"] = True
+        self._prefix: str | None = prefix
+
+
+class Out(PortSpec):
+    """Output port declaration. The attribute name becomes the output port name."""
+    _is_input = False
+
+    def __init__(self, type_str: str) -> None:
+        self.type_str = type_str
+        self._cfg: dict[str, Any] = {}
+
+    def as_tuple(self) -> tuple:
+        return (self.type_str, self._cfg)
+
+
+# ---------------------------------------------------------------------------
+# Typed convenience constructors — Inputs
+# ---------------------------------------------------------------------------
+def string_in(default: str = "", **kw: Any) -> In:
+    return In("STRING", default=default, **kw)
+
+def int_in(default: int = 0, **kw: Any) -> In:
+    return In("INT", default=default, **kw)
+
+def float_in(default: float = 0.0, **kw: Any) -> In:
+    return In("FLOAT", default=default, **kw)
+
+def bool_in(default: bool = False, **kw: Any) -> In:
+    return In("BOOL", default=default, **kw)
+
+def file_in(filter: list[str] | None = None, **kw: Any) -> In:
+    return In("FILE", allow_connection=False, enum_filter=filter, **kw)
+
+def enum_in(options: list[str], default: str | None = None, **kw: Any) -> In:
+    return In("ENUM", default=default or (options[0] if options else None),
+              enum_options=options, **kw)
+
+def any_in(**kw: Any) -> OptIn:
+    return OptIn("*", **kw)
+
+def dyn_in(type_str: str = "*", **kw: Any) -> DynIn:
+    return DynIn(type_str, **kw)
+
+def opt_string_in(default: str = "", **kw: Any) -> OptIn:
+    return OptIn("STRING", default=default, **kw)
+
+def opt_int_in(default: int = 0, **kw: Any) -> OptIn:
+    return OptIn("INT", default=default, **kw)
+
+def opt_float_in(default: float = 0.0, **kw: Any) -> OptIn:
+    return OptIn("FLOAT", default=default, **kw)
+
+def opt_bool_in(default: bool = False, **kw: Any) -> OptIn:
+    return OptIn("BOOL", default=default, **kw)
+
+
+# ---------------------------------------------------------------------------
+# Typed convenience constructors — Outputs
+# ---------------------------------------------------------------------------
+def string_out()  -> Out: return Out("STRING")
+def int_out()     -> Out: return Out("INT")
+def float_out()   -> Out: return Out("FLOAT")
+def bool_out()    -> Out: return Out("BOOL")
+def array_out()   -> Out: return Out("ARRAY")
+def dict_out()    -> Out: return Out("DICT")
+def file_out()    -> Out: return Out("FILE")
+def any_out()     -> Out: return Out("*")
+def command_out() -> Out: return Out("COMMAND")
+def signal_out()  -> Out: return Out("SIGNAL")
+
+
+def _collect_port_specs(cls: type) -> None:
+    """Scan *cls* for In/OptIn/DynIn/Out declarations and auto-generate
+    INPUT_TYPES / RETURN_TYPES / RETURN_NAMES if not already defined.
+
+    Markers are removed from the class dict after collection so they don't
+    shadow instance attributes.
+    """
+    required:  dict[str, tuple] = {}
+    optional:  dict[str, tuple] = {}
+    out_types: list[str]        = []
+    out_names: list[str]        = []
+    to_remove: list[str]        = []
+
+    for attr, val in list(cls.__dict__.items()):
+        if not isinstance(val, PortSpec):
+            continue
+        to_remove.append(attr)
+
+        if isinstance(val, Out):
+            out_types.append(val.type_str)
+            out_names.append(attr)
+        elif isinstance(val, DynIn):
+            prefix   = val._prefix if val._prefix else attr
+            dyn_name = f"{prefix}{{n}}"
+            optional[dyn_name] = val.as_tuple()
+        elif isinstance(val, OptIn):
+            optional[attr] = val.as_tuple()
+        else:  # In
+            if val._is_required:
+                required[attr] = val.as_tuple()
+            else:
+                optional[attr] = val.as_tuple()
+
+    for name in to_remove:
+        try:
+            delattr(cls, name)
+        except AttributeError:
+            pass
+
+    if required or optional:
+        _req, _opt = dict(required), dict(optional)
+        @classmethod  # type: ignore[misc]
+        def INPUT_TYPES(_cls: type) -> dict:
+            d: dict = {}
+            if _req: d["required"] = _req
+            if _opt: d["optional"] = _opt
+            return d
+        cls.INPUT_TYPES = INPUT_TYPES  # type: ignore[attr-defined]
+
+    if out_types:
+        cls.RETURN_TYPES = tuple(out_types)  # type: ignore[attr-defined]
+        cls.RETURN_NAMES = tuple(out_names)  # type: ignore[attr-defined]
+
+
 class BaseNode:
     title: str | None = None
     description: str = ""
@@ -147,12 +344,13 @@ class BaseNode:
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        
+
         if 'title' not in cls.__dict__:
             name = cls.__name__
             if name.endswith("Node"):
                 name = name[:-4]
             cls.title = name.lower()
+        _collect_port_specs(cls)
 
     def __init__(self) -> None:
         self.id: str = str(uuid.uuid4())
@@ -376,6 +574,19 @@ class BaseNode:
         self.error_msg = msg
         raise RuntimeError(msg)
 
+    def collect_dynamic(self, prefix: str, kwargs: dict) -> list:
+        """Return values for dynamic ports named '{prefix}1', '{prefix}2', ... sorted by number.
+
+        Filters out None values (unconnected trailing ports).
+        """
+        n = len(prefix)
+        pairs = [
+            (int(k[n:]), v)
+            for k, v in kwargs.items()
+            if k.startswith(prefix) and k[n:].isdigit() and v is not None
+        ]
+        return [v for _, v in sorted(pairs)]
+
     def resolve_path(self, path: str) -> str:
         if not path:
             return ""
@@ -539,8 +750,10 @@ class BaseNode:
                     p.allow_connection = True
                     # Copy relevant settings from template port if available
                     if template_port:
-                        p.editable = template_port.editable
+                        p.editable             = template_port.editable
                         p.display_in_inspector = template_port.display_in_inspector
+                        p.allow_connection     = template_port.allow_connection
+                        p.label                = template_port.label
                     port_dict[name] = p
                     changed = True
 
@@ -623,9 +836,20 @@ class BaseNode:
                     if port.is_dynamic:
                         prefix = port.name.rstrip("0123456789")
                         if name.startswith(prefix) and name[len(prefix):].isdigit():
-                            # Create the missing dynamic port
+                            # Create the missing dynamic port, copying all flags from the template
                             p = Port(name=name, is_input=True, port_type=port.port_type, node_id=node.id)
-                            p.is_dynamic = True
+                            p.is_dynamic           = True
+                            p.editable             = port.editable
+                            p.display_in_inspector = port.display_in_inspector
+                            p.allow_connection     = port.allow_connection
+                            p.full_row             = port.full_row
+                            p.below_ports          = port.below_ports
+                            p.label                = port.label
+                            p.row_height           = port.row_height
+                            p.row_stretch          = port.row_stretch
+                            p.enum_options         = port.enum_options
+                            p.enum_filter          = port.enum_filter
+                            p.graph_enum           = port.graph_enum
                             node.inputs[name] = p
                             break
 

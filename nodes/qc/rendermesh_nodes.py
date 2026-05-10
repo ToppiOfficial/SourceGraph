@@ -1,5 +1,5 @@
 from __future__ import annotations
-from core.node import BaseNode
+from core.node import BaseNode, string_in, int_in, file_in, DynIn, Out
 from nodes.qc.shared_categories import RENDERMESH_PARAMETER_CATEGORY, QC_CATEGORY
 
 
@@ -9,20 +9,10 @@ class BodyNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "name": ("STRING", {"default": "studio"}),
-                "mesh_file": ("FILE", {}),
-            },
-            "hidden": {
-                "_preview": "BOOL",
-            }
-        }
+    name = string_in(default="studio")
+    mesh_file = file_in()
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, name: str, mesh_file: str, _preview: bool = False, **kwargs):
         mesh = self.validate_file_input(mesh_file, must_exist=not _preview)
@@ -35,19 +25,10 @@ class BodygroupNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "name": ("STRING", {"default": "bodygroup"}),
-            },
-            "optional": {
-                "item{n}": ("COMMAND", {"dynamic": True}),
-            }
-        }
+    name = string_in(default="bodygroup")
+    item = DynIn(prefix="item", editable=False)
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, name: str, **kwargs):
         lines = [f'$bodygroup "{name}"', "{"]
@@ -65,16 +46,9 @@ class StudioNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "mesh_file": ("FILE", {}),
-            }
-        }
+    mesh_file = file_in()
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, mesh_file: str, **kwargs):
         path = self.validate_file_input(mesh_file, must_exist=False)
@@ -87,12 +61,7 @@ class BlankNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         return ("blank",)
@@ -104,19 +73,10 @@ class LODNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "threshold": ("INT", {"default": 10}),
-            },
-            "optional": {
-                "item{n}": ("COMMAND", {"dynamic": True}),
-            }
-        }
+    threshold = int_in(default=10)
+    item = DynIn(prefix="item")
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, threshold: int, **kwargs):
         lines = [f'$lod {threshold}', "{"]
@@ -133,17 +93,10 @@ class ReplaceModelNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "source_mesh": ("FILE", {}),
-                "target_mesh": ("FILE", {}),
-            }
-        }
+    source_mesh = file_in()
+    target_mesh = file_in()
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, source_mesh: str, target_mesh: str, **kwargs):
         src = self.validate_file_input(source_mesh, must_exist=False)
@@ -157,17 +110,10 @@ class ReplaceBoneNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "source_bone": ("STRING", {"default": "bone_src"}),
-                "target_bone": ("STRING", {"default": "bone_tgt"}),
-            }
-        }
+    source_bone = string_in(default="bone_src")
+    target_bone = string_in(default="bone_tgt")
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, source_bone: str, target_bone: str, **kwargs):
         return (f'replacebone "{source_bone}" "{target_bone}"',)
@@ -179,16 +125,9 @@ class RemoveMeshNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "mesh_file": ("FILE", {}),
-            }
-        }
+    mesh_file = file_in()
 
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("command",)
+    command = Out("QC_COMMAND")
 
     def execute(self, mesh_file: str, **kwargs):
         path = self.validate_file_input(mesh_file, must_exist=False)

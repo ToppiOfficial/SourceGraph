@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import os
-from core.node import BaseNode, PortType
+from core.node import BaseNode, PortType, any_in, string_in, float_in, int_in, Out
 
 class ConverterNode:
     CATEGORY = "Converters"
@@ -10,13 +10,9 @@ class ConverterNode:
 class ToStringNode(ConverterNode, BaseNode):
     """Converts any value to a string representation."""
     title = "To String"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("string",)
+    value = any_in()
+    string = Out("STRING")
 
     def execute(self, value, **kwargs):
         if value is None:
@@ -26,13 +22,9 @@ class ToStringNode(ConverterNode, BaseNode):
 class ToIntNode(ConverterNode, BaseNode):
     """Converts a value to an integer. Handles float strings and rounding."""
     title = "To Integer"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("INT",)
-    RETURN_NAMES = ("int",)
+    value = any_in()
+    int_out = Out("INT")
 
     def execute(self, value, **kwargs):
         try:
@@ -44,13 +36,9 @@ class ToIntNode(ConverterNode, BaseNode):
 class ToFloatNode(ConverterNode, BaseNode):
     """Converts a value to a floating point number."""
     title = "To Float"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("FLOAT",)
-    RETURN_NAMES = ("float",)
+    value = any_in()
+    float_out = Out("FLOAT")
 
     def execute(self, value, **kwargs):
         try:
@@ -61,13 +49,9 @@ class ToFloatNode(ConverterNode, BaseNode):
 class ToBoolNode(ConverterNode, BaseNode):
     """Converts a value to a boolean using Python's default truthiness logic."""
     title = "To Boolean"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("BOOL",)
-    RETURN_NAMES = ("bool",)
+    value = any_in()
+    bool_out = Out("BOOL")
 
     def execute(self, value, **kwargs):
         # Python's bool() handles None as False, 0 as False, empty containers as False
@@ -76,13 +60,9 @@ class ToBoolNode(ConverterNode, BaseNode):
 class ToDictNode(ConverterNode, BaseNode):
     """Parses a JSON string into a dictionary object."""
     title = "To Dictionary"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"json_string": ("STRING", {"default": "{}"})}}
 
-    RETURN_TYPES = ("DICT",)
-    RETURN_NAMES = ("dict",)
+    json_string = string_in(default="{}")
+    dict_out = Out("DICT")
 
     def execute(self, json_string: str, **kwargs):
         if not json_string:
@@ -96,13 +76,9 @@ class ToDictNode(ConverterNode, BaseNode):
 class ToListNode(ConverterNode, BaseNode):
     """Converts a value to a list. Parses JSON strings or wraps single items."""
     title = "To List"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("ARRAY",)
-    RETURN_NAMES = ("list",)
+    value = any_in()
+    list_out = Out("ARRAY")
 
     def execute(self, value, **kwargs):
         if isinstance(value, str):
@@ -123,13 +99,9 @@ class ToListNode(ConverterNode, BaseNode):
 class LengthNode(ConverterNode, BaseNode):
     """Returns the count of items in a list or characters in a string."""
     title = "Length"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("*", {})}}
 
-    RETURN_TYPES = ("INT",)
-    RETURN_NAMES = ("len",)
+    value = any_in()
+    len_out = Out("INT")
 
     def execute(self, value, **kwargs):
         try:
@@ -140,18 +112,10 @@ class LengthNode(ConverterNode, BaseNode):
 class RoundNode(ConverterNode, BaseNode):
     """Rounds a number to the specified decimal places."""
     title = "Round"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "value": ("FLOAT", {"default": 0.0}),
-                "decimals": ("INT", {"default": 0}),
-            }
-        }
 
-    RETURN_TYPES = ("FLOAT",)
-    RETURN_NAMES = ("rounded",)
+    value = float_in(default=0.0)
+    decimals = int_in(default=0)
+    rounded = Out("FLOAT")
 
     def execute(self, value: float, decimals: int, **kwargs):
         try:
@@ -164,13 +128,9 @@ class RoundNode(ConverterNode, BaseNode):
 class AbsoluteNode(ConverterNode, BaseNode):
     """Returns the absolute (positive) value of a number."""
     title = "Absolute"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"value": ("FLOAT", {"default": 0.0})}}
 
-    RETURN_TYPES = ("FLOAT",)
-    RETURN_NAMES = ("abs",)
+    value = float_in(default=0.0)
+    abs_out = Out("FLOAT")
 
     def execute(self, value: float, **kwargs):
         try:
@@ -181,13 +141,9 @@ class AbsoluteNode(ConverterNode, BaseNode):
 class PathNormalizeNode(ConverterNode, BaseNode):
     """Normalizes a file path, ensuring consistent separators."""
     title = "Normalize Path"
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {"path": ("STRING", {"default": ""})}}
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("path",)
+    path = string_in(default="")
+    normalized = Out("STRING")
 
     def execute(self, path: str, **kwargs):
         if not path:

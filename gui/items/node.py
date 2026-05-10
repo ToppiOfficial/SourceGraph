@@ -125,8 +125,6 @@ class PortItem(QGraphicsEllipseItem):
             self._apply_color(self._base_color)
 
 
-
-
 class ResizeHandle(QGraphicsItem):
     """Small triangle in the bottom-right corner for horizontal resizing."""
     def __init__(self, parent: NodeItem):
@@ -225,7 +223,8 @@ class NodeItem(QGraphicsItem):
         if self.node.folded:
             self._h = self._calculate_height()
         else:
-            self._h = node.height if node.height is not None else self._calculate_height()
+            calc_h = self._calculate_height()
+            self._h = max(calc_h, node.height) if node.height is not None else calc_h
         
         # Height saved before folding so unfolding restores user-resized dimensions.
         self._unfolded_height: float | None = None
@@ -309,9 +308,7 @@ class NodeItem(QGraphicsItem):
             if full_row and not p.allow_connection:
                 h += port_rh
             elif full_row and p.allow_connection:
-                h += ROW_H
-                if is_editable or has_custom:
-                    below_extra += port_rh
+                h += port_rh if (is_editable or has_custom) else ROW_H
             elif below_flag:
                 h += ROW_H
                 if is_editable or has_custom:
@@ -387,20 +384,7 @@ class NodeItem(QGraphicsItem):
             if not (is_editable or has_custom or full_row or port.allow_connection):
                 continue
 
-            if full_row and not port.allow_connection:
-                # No port circle; widget spans full width (only if not connectable)
-                proxy = self._build_input_widget(name, port, current_y)
-                if proxy:
-                    self._proxies[name] = proxy
-                current_y += port_rh
-            elif full_row and port.allow_connection:
-                pi = PortItem(port, self)
-                pi.setPos(0, current_y + ROW_H / 2)
-                self._port_items[name] = pi
-                if is_editable or has_custom:
-                    below_ports_queue.append((name, port))
-                current_y += ROW_H
-            elif below_flag:
+            if below_flag:
                 if port.allow_connection:
                     pi = PortItem(port, self)
                     pi.setPos(0, current_y + ROW_H / 2)
@@ -408,6 +392,23 @@ class NodeItem(QGraphicsItem):
                 if is_editable or has_custom:
                     below_ports_queue.append((name, port))
                 current_y += ROW_H
+            elif full_row and not port.allow_connection:
+                # No port circle; widget spans full width (only if not connectable)
+                proxy = self._build_input_widget(name, port, current_y)
+                if proxy:
+                    self._proxies[name] = proxy
+                current_y += port_rh
+            elif full_row and port.allow_connection:
+                pi = PortItem(port, self)
+                pi.setPos(0, current_y + port_rh / 2)
+                self._port_items[name] = pi
+                if is_editable or has_custom:
+                    proxy = self._build_input_widget(name, port, current_y)
+                    if proxy:
+                        self._proxies[name] = proxy
+                    current_y += port_rh
+                else:
+                    current_y += ROW_H
             else:
                 if port.allow_connection:
                     pi = PortItem(port, self)
@@ -951,9 +952,7 @@ class NodeItem(QGraphicsItem):
     def set_port_connected(self, port_name: str, connected: bool, source_port_type: PortType | None = None) -> None:
         proxy = self._proxies.get(port_name)
         if proxy:
-            port = self.node.inputs.get(port_name)
-            span_full = port and (getattr(port, 'full_row', False) or getattr(port, 'below_ports', False))
-            if not span_full and not self.node.has_gui_builder(port_name):
+            if not self.node.has_gui_builder(port_name):
                 proxy.setVisible(not connected)
         port_item = self._port_items.get(port_name)
         if port_item:
@@ -1015,7 +1014,8 @@ class NodeItem(QGraphicsItem):
         body = QRectF(0, 0, self._w, self._h)
         base_color = QColor(self.node.color)
 
-        # Clip everything to the body shape so no painting bleeds outside the rounded rect
+        painter.save()
+
         body_path = QPainterPath()
         body_path.addRoundedRect(body, r, r)
         painter.setClipPath(body_path)
@@ -1023,7 +1023,7 @@ class NodeItem(QGraphicsItem):
         # Body background — always dark neutral
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(NODE_BG))
-        painter.drawRect(body)  # clipped to rounded rect already
+        painter.drawRect(body)
 
         # Title bar — use dynamic height for folded nodes to accommodate arc spacing
         header_color = base_color.darker(HEADER_DARKNESS)
@@ -1035,7 +1035,8 @@ class NodeItem(QGraphicsItem):
             header_rect = QRectF(0, 0, self._w, TITLE_H)
         painter.drawRect(header_rect)
 
-        painter.setClipping(False)
+        # This is dumb.
+        painter.restore()
 
         pen_w = 1.0
 
@@ -1081,19 +1082,16 @@ class NodeItem(QGraphicsItem):
         title_start_x = PAD + 25 
         title_right_pad = 18 if not self.node.locked_title else 2 * PAD
         
-        # Set up drop shadow
         shadow_offset = 1
         painter.setPen(QColor(0, 0, 0, 40))  # Semi-transparent black shadow
         painter.setFont(QFont("Roboto", 9))
         
-        # Draw shadow
         painter.drawText(
             QRectF(title_start_x + shadow_offset, shadow_offset, self._w - title_start_x - title_right_pad, text_height),
             Qt.AlignVCenter | Qt.AlignLeft,
             title_text,
         )
         
-        # Draw main text
         painter.setPen(QColor(FG_BRIGHT))
         painter.drawText(
             QRectF(title_start_x, 0, self._w - title_start_x - title_right_pad, text_height),
@@ -1147,12 +1145,21 @@ class NodeItem(QGraphicsItem):
                 continue
 
             if full_row:
-                # Widget spans full row; no label drawn (port circle still exists if connectable)
-                row_offset_y += ROW_H if port.allow_connection else 0
-                row_offset_y += port_rh
+                if port.allow_connection:
+                    sc = self.scene()
+                    is_connected = bool(sc and hasattr(sc, "graph") and sc.graph.get_input_connection(self.node.id, name))
+                    if is_connected:
+                        painter.setPen(label_col)
+                        painter.drawText(
+                            QRectF(PR + PAD, row_offset_y, lbl_w, ROW_H),
+                            Qt.AlignVCenter | Qt.AlignLeft,
+                            _elide(port.label or name, int(lbl_w / 6)),
+                        )
+                    row_offset_y += port_rh if (is_editable or has_custom) else ROW_H
+                else:
+                    row_offset_y += port_rh
                 continue
 
-            # Draw the left-side label
             painter.setPen(label_col)
             painter.drawText(
                 QRectF(PR + PAD, row_offset_y, lbl_w, ROW_H),
