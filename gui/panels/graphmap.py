@@ -9,11 +9,105 @@ from gui.panels.base_panel import BasePanel
 from core.node import BaseNode, Port, PortType
 from core.graph import Graph
 from gui.node_editor import NodeEditorScene, NodeEditorView
-from gui.theme import ACCENT, BG_RAISED, COLOR_ERROR
+from gui.theme import ACCENT, BG_RAISED, COLOR_ERROR, FG_MAIN
 from gui.logger import log
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from gui.items.node import NodeItem
 from gui.items.wire import ConnectionItem
+from PySide6.QtGui import QPainterPath, QFont, QPainter, QPen, QColor, QBrush, QLinearGradient
+from PySide6.QtCore import QRectF, QPointF
+
+class GraphMapNodeItem(NodeItem):
+    """Custom node item for graph map with larger folded header and read-only ports."""
+    GRAPH_MAP_TITLE_H = 32
+
+    def _calculate_height(self):
+        """Override to use larger title height for folded nodes in graph map."""
+        from gui.items.node import _folded_height
+        if self.node.folded:
+            visible_outputs = sum(1 for p in self.node.outputs.values() if p.allow_connection)
+            visible_inputs = sum(1 for p in self.node.inputs.values()
+                               if p.allow_connection)
+            min_h = _folded_height(max(visible_outputs, visible_inputs))
+            return max(min_h, self.GRAPH_MAP_TITLE_H)
+        return super()._calculate_height()
+
+    def _build(self):
+        """Build node and make ports non-interactive."""
+        super()._build()
+        # Disable all port interaction after building
+        self._make_ports_readonly()
+
+    def _make_ports_readonly(self):
+        """Make all port items completely non-interactive."""
+        for port_item in self._port_items.values():
+            port_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            port_item.setFlag(QGraphicsItem.ItemIsFocusable, False)
+            port_item.setAcceptDrops(False)
+            port_item.setAcceptHoverEvents(False)
+            port_item.setAcceptedMouseButtons(Qt.NoButton)  # Ignore all mouse events
+            port_item.setCursor(Qt.ArrowCursor)
+
+
+
+class SharpConnectionItem(ConnectionItem):
+    """Connection item with sharp right-angle paths instead of bezier curves."""
+    def _refresh(self):
+        s, e = self.src, self.dst
+        path = QPainterPath(s)
+        mid_x = (s.x() + e.x()) / 2
+        path.lineTo(mid_x, s.y())
+        path.lineTo(e)
+        self.setPath(path)
+
+class GraphMapScene(NodeEditorScene):
+    """Custom scene for graph map that uses sharp connection wires and larger headers."""
+    def load_from_graph(self):
+        with self._undo_manager.skip_undo():
+            self.clear()
+            self._node_items.clear()
+            self._conn_items.clear()
+            for node in self.graph.nodes.values():
+                node.graph = self.graph
+                item = GraphMapNodeItem(node)
+                self._node_items[node.id] = item
+                self.addItem(item)
+                self._dirty_nodes.add(node.id)
+            for conn in self.graph.connections:
+                self._materialise_conn(conn)
+        self._undo_manager.clear()
+        self._emit_graph_changed()
+
+    def mousePressEvent(self, event):
+        """Block wire creation while allowing node selection for navigation."""
+        from gui.items.node import PortItem
+        from PySide6.QtGui import QTransform
+
+        item = self.itemAt(event.scenePos(), QTransform())
+
+        # Block port clicks (prevents wire creation)
+        if isinstance(item, PortItem):
+            event.accept()
+            return
+
+        # Allow node clicks and empty space for normal selection behavior
+        super().mousePressEvent(event)
+
+    def _materialise_conn(self, conn):
+        from core.graph import Connection
+        src_ni = self._node_items.get(conn.src_node)
+        dst_ni = self._node_items.get(conn.dst_node)
+        if not (src_ni and dst_ni):
+            return None
+        sp = src_ni.port_item(conn.src_port)
+        dp = dst_ni.port_item(conn.dst_port)
+        if not (sp and dp):
+            return None
+        ci = SharpConnectionItem(sp.scene_center(), dp.scene_center())
+        self._conn_items.append((conn, ci))
+        self.addItem(ci)
+        dst_ni.set_port_connected(conn.dst_port, True, sp.port.port_type)
+        return ci
 
 class NavGraphNode(BaseNode):
     """Minimal node for the hierarchy navigation graph."""
@@ -35,14 +129,11 @@ class GraphMapView(SafeGraphicsView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform | QPainter.TextAntialiasing)
-        self.allow_zoom = True
-        self.allow_pan = True
+        self.allow_zoom = False
+        self.allow_pan = False
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if not self.allow_zoom and not self.allow_pan:
-            event.accept()
-            return
-        super().wheelEvent(event)
+        event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Delete or event.matches(QKeySequence.Copy) or \
@@ -62,14 +153,12 @@ class GraphMapPanel(BasePanel):
         self._widget = QWidget()
         layout = QVBoxLayout(self._widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.map_graph = Graph()
-        self.map_scene = NodeEditorScene(self.map_graph)
+        self.map_scene = GraphMapScene(self.map_graph)
         self.map_scene.selectionChanged.connect(self._on_selection_changed)
 
-        self.map_view = GraphMapView(self.map_scene) # Pass scene to SafeGraphicsView
-        self.map_view.allow_zoom = False
-        self.map_view.allow_pan = False
+        self.map_view = GraphMapView(self.map_scene)
         self.map_view.show_grid = False
         self.map_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.map_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -163,6 +252,7 @@ class GraphMapPanel(BasePanel):
             def _build(nav, x, y):
                 gn = NavGraphNode(nav)
                 gn.x, gn.y = x, y
+                gn.folded = True
                 if nav == self.main_window._current_nav:
                     gn.color = ACCENT
                 elif getattr(nav, 'exec_error', False):
@@ -173,10 +263,10 @@ class GraphMapPanel(BasePanel):
                     gn.color = BG_RAISED
                 self.map_graph.add_node(gn)
                 node_map[nav] = gn
-                if not nav.children: return 120
+                if not nav.children: return 50
                 total_h = 0
                 for child in nav.children.values():
-                    total_h += _build(child, x + 250, y + total_h)
+                    total_h += _build(child, x + 220, y + total_h)
                 return total_h
 
             _build(self.main_window._nav_root, 0, 0)
@@ -186,11 +276,28 @@ class GraphMapPanel(BasePanel):
             self.map_scene.load_from_graph()
 
         self.map_scene.blockSignals(False)
-        
+
+        # Make all items read-only and non-interactive
         for item in self.map_scene.items():
             item.setFlag(QGraphicsItem.ItemIsMovable, False)
-            if isinstance(item, ConnectionItem): item.setFlag(QGraphicsItem.ItemIsSelectable, False)
-            if isinstance(item, NodeItem) and getattr(item.node, "nav_node", None) == self.main_window._current_nav:
-                item.setSelected(True)
+            item.setFlag(QGraphicsItem.ItemIsFocusable, False)
+            item.setAcceptDrops(False)
+            item.setAcceptHoverEvents(False)
+
+            if isinstance(item, NodeItem):
+                item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+
+                # Disable all port interaction
+                for port_item in item._port_items.values():
+                    port_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                    port_item.setFlag(QGraphicsItem.ItemIsFocusable, False)
+                    port_item.setAcceptDrops(False)
+                    port_item.setAcceptHoverEvents(False)
+                    port_item.setCursor(Qt.ArrowCursor)  # Reset cursor
+
+                if getattr(item.node, "nav_node", None) == self.main_window._current_nav:
+                    item.setSelected(False)  # Don't select, just color shows which is current
+            else:
+                item.setFlag(QGraphicsItem.ItemIsSelectable, False)
 
         QTimer.singleShot(50, self._fit_view)

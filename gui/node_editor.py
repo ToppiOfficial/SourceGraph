@@ -23,7 +23,7 @@ from core.recent_nodes import add_recent_node
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
 from nodes.subgraph.subgraph_node import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
-from gui.items.node       import NodeItem, ResizeHandle, PortItem
+from gui.items.node       import NodeItem, ResizeHandle, PortItem, DEFAULT_W
 from gui.items.wire import ConnectionItem
 from gui.dialogs import RenameDialog
 from gui.theme import *
@@ -230,7 +230,7 @@ class NotificationPopup(QLabel):
     def position_in_parent(self):
         if not self.parentWidget(): return
         parent_rect = self.parentWidget().rect()
-        x = parent_rect.width() - self.width() - 20
+        x = 20
         y = 20
         self.move(x, y)
 
@@ -511,6 +511,20 @@ class NodeEditorScene(QGraphicsScene):
                 })
         NodeEditorScene._clipboard = data
 
+    def cut_selection(self) -> None:
+        selected = [i for i in self.selectedItems() if isinstance(i, NodeItem)]
+        if not selected: return
+        with self._undo_manager.transaction("Cut Selection"):
+            self.copy_selection()
+            node_count = 0
+            for item in list(selected):
+                if isinstance(item, NodeItem):
+                    self._delete_node(item, push_undo=False)
+                    node_count += 1
+            if node_count > 0:
+                log.debug(f"Cut {node_count} nodes")
+            self._emit_graph_changed()
+
     def paste_from_clipboard(self, scene_pos: QPointF | None = None) -> None:
         if not NodeEditorScene._clipboard:
             return
@@ -667,14 +681,38 @@ class NodeEditorScene(QGraphicsScene):
 
         with self._undo_manager.transaction("Connect Ports"):
             if existing:
+                # Remove the visual item only — do NOT call _delete_conn() here.
+                # _delete_conn calls graph.disconnect() which triggers sync_dynamic_ports()
+                # and renumbers sibling dynamic ports before graph.connect() has run.
+                # graph.connect() already strips the old connection on dst_port atomically,
+                # so a separate disconnect would cause premature renumbering that then gets
+                # undone (incorrectly) when graph.connect() overwrites the slot.
                 for pair in list(self._conn_items):
                     if pair[0] == existing:
-                        self._delete_conn(pair[1], push_undo=False)
+                        try:
+                            self.removeItem(pair[1])
+                        except RuntimeError:
+                            pass
+                        self._conn_items.remove(pair)
                         break
 
             self.graph.connect(src.port.node_id, src.port.name,
                                dst.port.node_id, dst.port.name)
-            
+
+            # graph.connect() may trigger sync_dynamic_ports() which replaces Connection
+            # objects in graph.connections with new instances (renumbering). Any _conn_items
+            # entry whose connection is no longer live is a ghost — remove before materialising.
+            live_keys = {(c.src_node, c.src_port, c.dst_node, c.dst_port)
+                         for c in self.graph.connections}
+            for pair in list(self._conn_items):
+                c_obj, ci = pair
+                if (c_obj.src_node, c_obj.src_port, c_obj.dst_node, c_obj.dst_port) not in live_keys:
+                    try:
+                        self.removeItem(ci)
+                    except RuntimeError:
+                        pass
+                    self._conn_items.remove(pair)
+
             conn = self.graph.get_input_connection(dst.port.node_id, dst.port.name)
             if conn:
                 self._materialise_conn(conn)
@@ -1196,7 +1234,7 @@ class NodeEditorView(SafeGraphicsView):
                 else:
                     # Asset Node Logic
                     ext = os.path.splitext(value)[1].lower()
-                    if ext == ".srcsubgraph":
+                    if ext in (".srcsubgraph", ".srcgraph"):
                         cls = NODE_CLASS_MAPPINGS.get("SubgraphNode")
                         assign_key = "graph_path"
                     else:
@@ -1373,6 +1411,9 @@ class NodeEditorView(SafeGraphicsView):
         elif event.matches(QKeySequence.Copy):
             self.scene().copy_selection()
             return
+        elif event.matches(QKeySequence.Cut):
+            self.scene().cut_selection()
+            return
         elif event.matches(QKeySequence.Paste):
             self.scene().paste_from_clipboard(self._get_mouse_scene_pos())
             return
@@ -1493,6 +1534,8 @@ class NodeEditorView(SafeGraphicsView):
             open_act   = None
             if isinstance(item.node, SubgraphNode):
                 open_act = menu.addAction("Open Subgraph")
+
+            resize_act = menu.addAction("Resize")
             convert_act = menu.addAction("Convert to Subgraph")
             delete_act  = menu.addAction("Delete")
             
@@ -1516,6 +1559,10 @@ class NodeEditorView(SafeGraphicsView):
                     self.subgraph_requested.emit(path)
             elif action == rename_act:
                 self.scene()._start_rename(item)
+            elif action == resize_act:
+                default_h = item._calculate_height()
+                cmd = ResizeNodeCommand(item, item._w, item._h, DEFAULT_W, default_h)
+                self.scene()._undo_manager.undo_stack.push(cmd)
             elif action == convert_act:
                 targets = [i for i in self.scene().selectedItems() if isinstance(i, NodeItem)]
                 if not targets:

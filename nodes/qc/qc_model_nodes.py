@@ -175,13 +175,15 @@ class FlexControllerNode(BaseNode):
     """Generates flexcontroller parameter for $model."""
     title = "Flex Controller"
     CATEGORY = MODEL_PARAMETER_CATEGORY
-    
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "group": ("ENUM", {"enum_options": ["mouth", "eyes", "brow", "nose", "ear"]}),
                 "name": ("STRING", {"default": "flex"}),
+                "flex_name": ("STRING", {"default": "flex_target"}),
+            },
+            "optional": {
                 "min": ("FLOAT", {"default": 0.0}),
                 "max": ("FLOAT", {"default": 1.0}),
             }
@@ -190,8 +192,8 @@ class FlexControllerNode(BaseNode):
     RETURN_TYPES = ("COMMAND",)
     RETURN_NAMES = ("param",)
 
-    def execute(self, group, name, min, max, **kwargs):
-        return (f'flexcontroller {group} range {min} {max} "{name}"',)
+    def execute(self, name, flex_name, min=0.0, max=1.0, **kwargs):
+        return (f'flexcontroller "{name}" range {min} {max} "{flex_name}"',)
 
 class FlexRuleNode(BaseNode):
     """Generates flexrule block for $model."""
@@ -215,6 +217,36 @@ class FlexRuleNode(BaseNode):
                 f'{{\n'
                 f'  {expression}\n'
                 f'}}',)
+
+class FlexFileNode(BaseNode):
+    """Generates flexfile parameter for $model (VTA morph targets)."""
+    title = "Flex File"
+    CATEGORY = MODEL_PARAMETER_CATEGORY
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "vta_file": ("FILE", {"enum_filter": [".vta"]}),
+            },
+            "optional": {
+                "param{n}": ("COMMAND", {"dynamic": True}),
+            }
+        }
+
+    RETURN_TYPES = ("COMMAND",)
+    RETURN_NAMES = ("param",)
+
+    def execute(self, vta_file, **kwargs):
+        vta = self.validate_file_input(vta_file, must_exist=False)
+        parts = [f'flexfile "{vta}"', "{"]
+
+        for k, v in kwargs.items():
+            if k.startswith("param") and k[5:].isdigit() and v:
+                parts.append(f"    {v}")
+
+        parts.append("}")
+        return ("\n".join(parts),)
 
 class DefaultFlexNode(BaseNode):
     """Sets a default value for a flex controller."""
@@ -264,7 +296,8 @@ class FlagNode(BaseNode):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "flag": ("ENUM", {"enum_options": ["blank", "noninteract", "hidden", "no_flex_values", "noautodmxrules"]}),
+                "flag": ("ENUM",{"enum_options": ["blank", "noninteract", "hidden", "no_flex_values", "noautodmxrules"],
+                                 "allow_connection": False,"full_row": True}),
             }
         }
 
@@ -295,18 +328,3 @@ class SphereNode(BaseNode):
 
     def execute(self, x, y, z, radius, **kwargs):
         return (f'sphere {x} {y} {z} {radius}',)
-
-class NormalsNode(BaseNode):
-    """Generates normals parameter for $model."""
-    title = "Normals"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {}
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("param",)
-
-    def execute(self, **kwargs):
-        return ('normals',)

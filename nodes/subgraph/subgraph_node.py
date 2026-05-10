@@ -22,7 +22,7 @@ class SubgraphNode(BaseNode):
             "required": {
                 "graph_path": ("FILE", {
                     "default": "",
-                    "visible": False,
+                    "allow_connection": False,
                     "full_row": True,
                     "enum_filter": [".srcsubgraph"],
                 }),

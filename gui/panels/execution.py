@@ -20,7 +20,15 @@ from core.execution import (
 from gui.logger import log
 from PySide6.QtGui import QColor
 from gui.theme import *
-from gui.theme import get_execution_icon
+from gui.theme import (
+    get_execution_icon,
+    EXEC_ITEM_CHECKBOX_STYLE,
+    EXEC_ITEM_TEXT_LABEL_STYLE,
+    EXEC_ITEM_ORDER_LABEL_STYLE,
+    EXEC_LIST_WIDGET_STYLE,
+    SESSION_RENAME_EDIT_STYLE,
+    SESSION_RENAME_EDIT_ERROR_STYLE
+)
 
 
 class ExecutionItemWidget(QWidget):
@@ -51,54 +59,20 @@ class ExecutionItemWidget(QWidget):
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(True)
         self.checkbox.setFixedSize(16, 16)
-        self.checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                background: transparent;
-                border: none;
-            }}
-            QCheckBox::indicator {{
-                width: 14px;
-                height: 14px;
-                border: 1px solid {BORDER_LIGHT};
-                border-radius: 2px;
-                background-color: {BG_SURFACE};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {ACCENT};
-                border: 1px solid {ACCENT};
-            }}
-            QCheckBox::indicator:hover {{
-                border: 1px solid {ACCENT};
-            }}
-        """)
+        self.checkbox.setStyleSheet(EXEC_ITEM_CHECKBOX_STYLE)
         layout.addWidget(self.checkbox)
         
         # Text label (non-editable)
         self.text_label = QLabel()
         display_text = self._format_display_text()
         self.text_label.setText(display_text)
-        self.text_label.setStyleSheet(f"""
-            color: {FG_MAIN}; 
-            font-size: 12px;
-            font-weight: 500;
-            padding: 2px;
-        """)
+        self.text_label.setStyleSheet(EXEC_ITEM_TEXT_LABEL_STYLE)
         layout.addWidget(self.text_label, 1)
         
         # Add execution order indicator
         self.order_label = QLabel()
         self.order_label.setText(f"{index + 1}")
-        self.order_label.setStyleSheet(f"""
-            color: {FG_DIM};
-            font-size: 10px;
-            font-weight: bold;
-            background: {BG_SURFACE};
-            border: 1px solid {BORDER_LIGHT};
-            border-radius: 8px;
-            padding: 2px 6px;
-            min-width: 16px;
-            max-width: 24px;
-        """)
+        self.order_label.setStyleSheet(EXEC_ITEM_ORDER_LABEL_STYLE)
         self.order_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.order_label)
         
@@ -143,12 +117,7 @@ class ExecutionItemWidget(QWidget):
 
     def set_error_highlight(self, active: bool):
         color = COLOR_ERROR if active else FG_MAIN
-        self.text_label.setStyleSheet(f"""
-            color: {color};
-            font-size: 12px;
-            font-weight: 500;
-            padding: 2px;
-        """)
+        self.text_label.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: 500; padding: 2px;")
     
     def is_checked(self) -> bool:
         return self.checkbox.isChecked()
@@ -173,52 +142,7 @@ class ExecutionListWidget(QListWidget):
         self.setIconSize(QSize(16, 16))
         self.customContextMenuRequested.connect(self._show_context_menu)
         self._current_menu = None  # Track current menu to prevent duplicates
-        self.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {BG_DARK};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 6px;
-                padding: 4px;
-                outline: none;
-                font-family: {FONT_UI};
-            }}
-            QListWidget::item {{
-                padding: 2px;
-                margin: 1px 2px;
-                border: 1px solid transparent;
-                border-radius: 4px;
-                background-color: {BG_SURFACE};
-                min-height: 28px;
-            }}
-            QListWidget::item:hover {{
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 {BG_HOVER}, stop:1 {BG_RAISED}); 
-                border: 1px solid {BORDER_LIGHT};
-            }}
-            QListWidget::item:selected {{
-                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 {BG_SELECTED}, stop:1 {BG_HOVER}); 
-                border: 1px solid {ACCENT};
-                color: {FG_BRIGHT};
-            }}
-            QListWidget::item:focus {{
-                outline: none;
-            }}
-            QScrollBar:vertical {{
-                background: {BG_MED};
-                width: 8px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {BG_SURFACE};
-                border-radius: 4px;
-                min-height: 20px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {BG_HOVER};
-            }}
-        """)
+        self.setStyleSheet(EXEC_LIST_WIDGET_STYLE)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Delete:
@@ -449,7 +373,8 @@ class ExecutionPanel(QWidget):
         self._eyedropper_target_id: str | None = None
         self._last_failed_node_id: str | None = None
         self._failed_session_items: set[str] = set()
-        
+        self._session_rename_original_name: str | None = None
+
         self._setup_ui()
         
     def keyPressEvent(self, event):
@@ -488,15 +413,17 @@ class ExecutionPanel(QWidget):
         self.session_combo.setStyleSheet(NODE_COMBO_STYLE)
         session_layout.addWidget(self.session_combo, 1)
         
-        self.btn_new_session = QPushButton("Add")
+        self.btn_new_session = QPushButton("+")
         self.btn_new_session.setToolTip("New Session")
         self.btn_new_session.setStyleSheet(BTN_STYLE)
+        self.btn_new_session.setFixedSize(24, 24)
         self.btn_new_session.clicked.connect(lambda: self._new_session())
         session_layout.addWidget(self.btn_new_session)
         
-        self.btn_del_session = QPushButton("Del")
+        self.btn_del_session = QPushButton("-")
         self.btn_del_session.setToolTip("Delete Session")
         self.btn_del_session.setStyleSheet(BTN_STYLE)
+        self.btn_del_session.setFixedSize(24, 24)
         self.btn_del_session.clicked.connect(self._delete_session)
         session_layout.addWidget(self.btn_del_session)
         
@@ -505,21 +432,8 @@ class ExecutionPanel(QWidget):
         # Rename field row
         rename_layout = QHBoxLayout()
         self.session_rename_edit = QLineEdit()
-        self.session_rename_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background: {BG_SURFACE};
-                border: 1px solid {BORDER_LIGHT};
-                border-radius: 3px;
-                color: {FG_MAIN};
-                padding: 4px;
-                font-size: 11px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {ACCENT};
-            }}
-        """)
+        self.session_rename_edit.setStyleSheet(SEARCH_BAR_STYLE)
         self.session_rename_edit.textEdited.connect(self._on_session_name_changed)
-        self.session_rename_edit.returnPressed.connect(self._apply_session_rename)
         self.session_rename_edit.editingFinished.connect(self._on_rename_editing_finished)
         rename_layout.addWidget(self.session_rename_edit, 1)
         
@@ -685,6 +599,7 @@ class ExecutionPanel(QWidget):
         if not name or not isinstance(name, str) or name not in self.sessions:
             return
         self.current_session = self.sessions[name]
+        self._session_rename_original_name = name
         self._refresh_node_list()
         self.session_rename_edit.blockSignals(True)
         self.session_rename_edit.setText(name)
@@ -692,80 +607,57 @@ class ExecutionPanel(QWidget):
         self._reset_rename_style()
     
     def _on_session_name_changed(self, text: str):
-        current_name = self.session_combo.currentText()
-        if text.strip() and text.strip() != current_name and text.strip() in self.sessions:
-            self.session_rename_edit.setStyleSheet(f"""
-                QLineEdit {{
-                    background: {BG_SURFACE};
-                    border: 1px solid {COLOR_ERROR};
-                    border-radius: 3px;
-                    color: {FG_MAIN};
-                    padding: 4px;
-                    font-size: 11px;
-                }}
-            """)
-        else:
-            self._reset_rename_style()
-    
-    def _apply_session_rename(self):
-        new_name = self.session_rename_edit.text().strip()
+        new_name = text.strip()
         current_name = self.session_combo.currentText()
 
-        if not new_name or new_name == current_name:
-            self.session_rename_edit.blockSignals(True)
-            self.session_rename_edit.setText(current_name)
-            self.session_rename_edit.blockSignals(False)
+        if not new_name:
+            self.session_rename_edit.setStyleSheet(SESSION_RENAME_EDIT_ERROR_STYLE)
+            return
+
+        if new_name in self.sessions and new_name != current_name:
+            self.session_rename_edit.setStyleSheet(SESSION_RENAME_EDIT_ERROR_STYLE)
+            return
+
+        if new_name == current_name:
             self._reset_rename_style()
             return
 
-        if new_name in self.sessions:
-            self.session_rename_edit.blockSignals(True)
-            self.session_rename_edit.setText(current_name)
-            self.session_rename_edit.blockSignals(False)
-            self._reset_rename_style()
-            return
-
-        mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
-        with mgr.transaction(f"Rename Session: {current_name} → {new_name}") if mgr else nullcontext():
-            session = self.sessions.pop(current_name, None)
-            if session:
-                session.name = new_name
-                self.sessions[new_name] = session
-                self.session_combo.blockSignals(True)
-                idx = self.session_combo.findText(current_name)
-                if idx >= 0:
-                    self.session_combo.setItemText(idx, new_name)
-                    self.session_combo.setCurrentIndex(idx)
-                self.session_combo.blockSignals(False)
-                self._sync_to_graph()
-
-        self.session_rename_edit.blockSignals(True)
-        self.session_rename_edit.setText(new_name)
-        self.session_rename_edit.blockSignals(False)
         self._reset_rename_style()
+        self._apply_session_rename_impl_no_transaction(current_name, new_name)
+
+    def _apply_session_rename_impl_no_transaction(self, current_name: str, new_name: str):
+        """Apply the rename without creating an undo transaction."""
+        session = self.sessions.pop(current_name, None)
+        if session:
+            session.name = new_name
+            self.sessions[new_name] = session
+            self.session_combo.blockSignals(True)
+            idx = self.session_combo.findText(current_name)
+            if idx >= 0:
+                self.session_combo.setItemText(idx, new_name)
+                self.session_combo.setCurrentIndex(idx)
+            self.session_combo.blockSignals(False)
+            self._sync_to_graph()
 
     def _on_rename_editing_finished(self):
         current_name = self.session_combo.currentText()
-        if self.session_rename_edit.text() != current_name:
+        edit_text = self.session_rename_edit.text().strip()
+
+        if not edit_text or (edit_text in self.sessions and edit_text != current_name):
             self.session_rename_edit.blockSignals(True)
             self.session_rename_edit.setText(current_name)
             self.session_rename_edit.blockSignals(False)
             self._reset_rename_style()
+            return
+
+        if self._session_rename_original_name and self._session_rename_original_name != current_name:
+            mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
+            with mgr.transaction(f"Rename Session: {self._session_rename_original_name} → {current_name}") if mgr else nullcontext():
+                pass
+            self._session_rename_original_name = current_name
 
     def _reset_rename_style(self):
-        self.session_rename_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background: {BG_SURFACE};
-                border: 1px solid {BORDER_LIGHT};
-                border-radius: 3px;
-                color: {FG_MAIN};
-                padding: 4px;
-                font-size: 11px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {ACCENT};
-            }}
-        """)
+        self.session_rename_edit.setStyleSheet(SESSION_RENAME_EDIT_STYLE)
             
     def _refresh_node_list(self):
         self.node_list.clear()

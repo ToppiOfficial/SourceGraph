@@ -48,7 +48,6 @@ class Port:
     node_id:   str      = ""
     value:     Any      = None
     label:     str      = ""
-    visible:   bool     = True
     allow_connection: bool = True
     is_dynamic: bool = False
     display_in_inspector: bool = True
@@ -212,9 +211,8 @@ class BaseNode:
     def _add_port_from_spec(self, name: str, spec: Any, required: bool = False) -> Port:
         port_type = parse_type(spec)
         config = get_type_config(spec)
-        
+
         default = config.get("default")
-        visible = config.get("visible", True)
         editable = config.get("editable", True)
         display_in_inspector = config.get("display_in_inspector", True)
         enum_options = config.get("enum_options")
@@ -246,7 +244,6 @@ class BaseNode:
             node_id=self.id,
             value=default
         )
-        p.visible = visible
         p.editable = editable
         p.display_in_inspector = display_in_inspector
         p.required = required
@@ -531,13 +528,19 @@ class BaseNode:
             target_count = max(min_empty_ports, max_conn_idx + 1)
             port_dict = self.inputs if is_input else self.outputs
 
+            # Get the template port to copy settings from
+            template_port = next((p for p in port_dict.values() if p.is_dynamic and p.name.startswith(prefix)), None)
+
             for i in range(1, target_count + 1):
                 name = f"{prefix}{i}"
                 if name not in port_dict:
                     p = Port(name=name, is_input=is_input, port_type=ptype, node_id=self.id)
                     p.is_dynamic = True
-                    p.visible = True
                     p.allow_connection = True
+                    # Copy relevant settings from template port if available
+                    if template_port:
+                        p.editable = template_port.editable
+                        p.display_in_inspector = template_port.display_in_inspector
                     port_dict[name] = p
                     changed = True
 

@@ -463,6 +463,119 @@ NODE_FILE_LABEL_STYLE = f"""
     }}
 """
 
+# -- Execution Panel Styles ---------------------------------------------------
+EXEC_ITEM_CHECKBOX_STYLE = f"""
+QCheckBox {{
+    background: transparent;
+    border: none;
+}}
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid {BORDER_LIGHT};
+    border-radius: 2px;
+    background-color: {BG_SURFACE};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {ACCENT};
+    border: 1px solid {ACCENT};
+}}
+QCheckBox::indicator:hover {{
+    border: 1px solid {ACCENT};
+}}
+"""
+
+EXEC_ITEM_TEXT_LABEL_STYLE = f"""
+color: {FG_MAIN};
+font-size: 12px;
+font-weight: 500;
+padding: 2px;
+"""
+
+EXEC_ITEM_ORDER_LABEL_STYLE = f"""
+color: {FG_DIM};
+font-size: 10px;
+font-weight: bold;
+background: {BG_SURFACE};
+border: 1px solid {BORDER_LIGHT};
+border-radius: 8px;
+padding: 2px 6px;
+min-width: 16px;
+max-width: 24px;
+"""
+
+EXEC_LIST_WIDGET_STYLE = f"""
+QListWidget {{
+    background-color: {BG_DARK};
+    border: 1px solid {BORDER_DARK};
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+    font-family: {FONT_UI};
+}}
+QListWidget::item {{
+    padding: 2px;
+    margin: 1px 2px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background-color: {BG_SURFACE};
+    min-height: 28px;
+}}
+QListWidget::item:hover {{
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {BG_HOVER}, stop:1 {BG_RAISED});
+    border: 1px solid {BORDER_LIGHT};
+}}
+QListWidget::item:selected {{
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {BG_SELECTED}, stop:1 {BG_HOVER});
+    border: 1px solid {ACCENT};
+    color: {FG_BRIGHT};
+}}
+QListWidget::item:focus {{
+    outline: none;
+}}
+QScrollBar:vertical {{
+    background: {BG_MED};
+    width: 8px;
+    border: none;
+    border-radius: 4px;
+}}
+QScrollBar::handle:vertical {{
+    background: {BG_SURFACE};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {BG_HOVER};
+}}
+"""
+
+SESSION_RENAME_EDIT_STYLE = f"""
+QLineEdit {{
+    background: {BG_DARK};
+    border: 1px solid {BORDER_DARK};
+    border-radius: 3px;
+    color: {FG_BRIGHT};
+    padding: 4px;
+    font-size: 11px;
+}}
+QLineEdit:focus {{
+    border: 1px solid {ACCENT};
+}}
+"""
+
+SESSION_RENAME_EDIT_ERROR_STYLE = f"""
+QLineEdit {{
+    background: {BG_SURFACE};
+    border: 1px solid {COLOR_ERROR};
+    border-radius: 3px;
+    color: {FG_MAIN};
+    padding: 4px;
+    font-size: 11px;
+}}
+"""
+
 # -- Icon Creation Functions ---------------------------------------------------
 
 def get_folder_icon(size: int = 16) -> QIcon:

@@ -144,7 +144,7 @@ class SelectedNodePanel(QWidget):
         for pname, port in node.inputs.items():
             if not port.display_in_inspector:
                 continue
-            if not port.visible and port.port_type not in _EDITABLE and port.editable:
+            if not port.editable and port.port_type not in _EDITABLE:
                 continue
             conn = scene.graph.get_input_connection(node.id, pname)
             row = QWidget()

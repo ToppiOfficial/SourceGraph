@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 from core.node import BaseNode
+from pathlib import Path
 
 
 class FileLoader(BaseNode):
@@ -16,7 +17,7 @@ class FileLoader(BaseNode):
             "required": {
                 "asset": ("FILE", {
                     "default": "",
-                    "visible": False,
+                    "allow_connection": False,
                     "editable": True,
                     "full_row": True,
                 }),
@@ -111,6 +112,11 @@ class FileLoader(BaseNode):
         self.on_property_changed()
         if self.graph:
             self.graph.commit_change("Change File")
+            scene = getattr(self.graph, '_scene_ref', lambda: None)()
+            if scene:
+                item = getattr(scene, '_node_items', {}).get(self.id)
+                if item:
+                    item.refresh()
 
     def execute(self, asset: str, **kwargs):
         path = self.validate_file_input(asset, must_exist=True)
@@ -130,7 +136,7 @@ class VariableOutNode(BaseNode):
             "required": {
                 "var_name": ("ENUM", {
                     "default": "",
-                    "visible": False,
+                    "allow_connection": False,
                     "graph_enum": "variables",
                     "label": "variable",
                 }),
@@ -172,13 +178,13 @@ class VariableInNode(BaseNode):
             "required": {
                 "var_name": ("ENUM", {
                     "default": "",
-                    "visible": False,
+                    "allow_connection": True,
                     "graph_enum": "variables",
                     "label": "variable",
                 }),
             },
             "optional": {
-                "new_value": ("*", {}),
+                "new_value": ("*", {"editable": False,}),
             }
         }
 
@@ -215,7 +221,7 @@ class SessionNode(BaseNode):
             "required": {
                 "session_name": ("STRING", {
                     "default": "",
-                    "visible": False,
+                    "allow_connection": False,
                     "full_row": True,
                 }),
             }
@@ -227,6 +233,7 @@ class SessionNode(BaseNode):
     def on_property_changed(self):
         port = self.inputs.get("session_name")
         name = port.value if port and port.value else ""
+        self.title = name if name else "Session"
         if hasattr(self, '_session_label'):
             try:
                 self._session_label.setText(name if name else "Select session…")
@@ -280,6 +287,123 @@ class SessionNode(BaseNode):
         self.on_property_changed()
         if self.graph:
             self.graph.commit_change("Change Session")
+            scene = getattr(self.graph, '_scene_ref', lambda: None)()
+            if scene:
+                item = getattr(scene, '_node_items', {}).get(self.id)
+                if item:
+                    item.refresh_ports()
 
     def execute(self, session_name: str, **kwargs):
         return (session_name,)
+
+
+class ReadFile(BaseNode):
+    """Reads and returns the raw content of a file."""
+    title = "ReadFile"
+    CATEGORY = "General"
+    color = "#ce9178"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "file": ("FILE", {
+                    "default": "",
+                    "allow_connection": True,
+                    "editable": False,
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("content",)
+
+    def execute(self, file: str, **kwargs):
+        path = self.resolve_path(file)
+        if not path:
+            self.fail("File path is empty.")
+        if not os.path.exists(path):
+            self.fail(f"File not found: {path}")
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return (f.read(),)
+        except (UnicodeDecodeError, UnicodeError):
+            with open(path, 'rb') as f:
+                return (f.read(),)
+            
+
+class OutputToFileNode(BaseNode):
+    title = "Save To File"
+    CATEGORY = "General"
+    color = "#7a2d2d"
+    locked_title = True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "out_path": ("STRING", {"default": "", "full_row": True, "allow_connection": False}),
+                "content": ("*", {"editable": False}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    RETURN_NAMES = ()
+
+    def on_property_changed(self):
+        port = self.inputs.get("out_path")
+        out_path = port.value if port else ""
+
+        if out_path:
+            self.title = "Save " + os.path.basename(out_path)
+        else:
+            self.title = "Save To File"
+
+    def create_widget_for_port(self, port):
+        if port.name != "out_path":
+            return None
+
+        from PySide6.QtWidgets import QPushButton, QHBoxLayout, QWidget, QLineEdit
+        from gui.theme import BTN_STYLE, NODE_WIDGET_STYLE
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
+
+        # Text edit for the file path
+        path_edit = QLineEdit()
+        path_edit.setStyleSheet(NODE_WIDGET_STYLE)
+        path_edit.setText(str(port.value) if port.value else "")
+        path_edit.editingFinished.connect(lambda: self._on_path_changed(path_edit))
+        layout.addWidget(path_edit, 1)
+
+        # Save file dialog button
+        browse_btn = QPushButton("...")
+        browse_btn.setFixedWidth(24)
+        browse_btn.setStyleSheet(BTN_STYLE)
+        browse_btn.clicked.connect(lambda: self._show_save_dialog(path_edit))
+        layout.addWidget(browse_btn)
+
+        self._path_edit = path_edit
+        return container
+
+    def _show_save_dialog(self, path_edit: QLineEdit) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(None, "Save File As", "", "All Files (*)")
+        if path:
+            path_edit.setText(path)
+            self.inputs["out_path"].value = path
+            self.on_property_changed()
+
+    def _on_path_changed(self, path_edit: QLineEdit) -> None:
+        self.inputs["out_path"].value = path_edit.text()
+        self.on_property_changed()
+
+    def execute(self, content, out_path: str, **kwargs):
+        from gui.logger import log
+        try:
+            Path(out_path).write_text(str(content), encoding="utf-8")
+            log.info(f"Written → {out_path}")
+        except Exception as exc:
+            log.error(f"Error: {exc}")

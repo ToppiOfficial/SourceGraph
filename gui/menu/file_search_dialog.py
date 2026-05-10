@@ -5,10 +5,12 @@ import json
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget,
     QListWidgetItem, QLabel, QFrame, QWidget, QScrollArea,
+    QApplication
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QKeyEvent, QPixmap
 from gui.theme import *
+from gui.main_window import MainWindow
 
 _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.tga', '.dds', '.bmp', '.tiff', '.tif', '.gif', '.webp', '.exr', '.hdr'}
 
@@ -20,8 +22,6 @@ def _find_graph(parent_widget):
             return p.graph
         p = p.parent()
     try:
-        from PySide6.QtWidgets import QApplication
-        from gui.main_window import MainWindow
         mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
         if mw and hasattr(mw, 'graph'):
             return mw.graph
@@ -471,16 +471,34 @@ class SessionSearchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setFixedSize(400, 300)
+        self.setFixedSize(300, 400)
         self.setStyleSheet(ENHANCED_MENU_STYLE)
         self.selected_session: str | None = None
 
         try:
-            from PySide6.QtWidgets import QApplication
-            from gui.main_window import MainWindow
             mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
             exec_p = mw.panel_manager.get_widget("ExecutionDock") if mw else None
-            self._sessions = [s.name for s in exec_p.sessions.values()] if exec_p else []
+            self._sessions = []
+
+            # I don't know why, I don't want to know why, but the session items
+            # won't properly list unless we do this.  wtf
+            if exec_p and exec_p.graph:
+                for session in exec_p.sessions.values():
+                    for node_id in session.node_ids:
+                        node = exec_p.graph.nodes.get(node_id)
+                        custom = session.node_names.get(node_id, "")
+                        if node:
+                            node_title = node.title
+                            node_class = node.__class__.__name__.replace("Node", "")
+                            if custom:
+                                name = f"{custom} ({node_title})"
+                            else:
+                                name = f"{node_title} ({node_class})" if len(node_title) < 40 else node_title
+                        elif custom:
+                            name = custom
+                        else:
+                            continue
+                        self._sessions.append(name)
         except Exception:
             self._sessions = []
 
@@ -510,7 +528,9 @@ class SessionSearchDialog(QDialog):
     def _refresh(self, items: list[str]):
         self.item_list.clear()
         for s in items:
-            self.item_list.addItem(s)
+            item = QListWidgetItem(s)
+            item.setSizeHint(QSize(0, 40))
+            self.item_list.addItem(item)
         if self.item_list.count():
             self.item_list.setCurrentRow(0)
 

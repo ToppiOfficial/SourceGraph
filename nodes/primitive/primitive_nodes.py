@@ -1,6 +1,5 @@
 from __future__ import annotations
 from core.node import BaseNode
-from pathlib import Path
 
 
 class PrimitiveNode:
@@ -145,7 +144,7 @@ class JoinToArrayNode(BaseNode):
 
 class PrintNode(BaseNode):
     title = "Print"
-    CATEGORY = "Primitives"
+    CATEGORY = "General"
     color = "#6272a4"
     default_width = 200
 
@@ -159,9 +158,12 @@ class PrintNode(BaseNode):
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "value": ("*", {"visible": True, "allow_connection": True, "below_ports": True, "row_height": 80, "row_stretch": True}),
+                "value": ("*", {"allow_connection": True, "full_row": True, "row_height": 100, "row_stretch": True}),
             },
         }
+
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("passthrough",)
 
     @property
     def output_text(self):
@@ -173,7 +175,7 @@ class PrintNode(BaseNode):
         print(text)
         self._output_buffer.clear()
         self._output_buffer.append(text)
-        return text
+        return (value,)
     
     def sync_presentation(self) -> None:
         """Override to trigger GUI updates when output text changes."""
@@ -189,9 +191,10 @@ class PrintNode(BaseNode):
         
         def create_print_display(port):
             from PySide6.QtWidgets import QTextEdit
-            
+
             display = QTextEdit()
             display.setReadOnly(True)
+            display.setTabStopDistance(20)
             display.setStyleSheet(f"""
                 QTextEdit {{
                     background-color: #111111;
@@ -206,7 +209,7 @@ class PrintNode(BaseNode):
                     border: 1px solid #63c2df;
                 }}
             """)
-            
+
             self._display_widget = display
             if hasattr(self, 'output_text'):
                 display.setPlainText(self.output_text)
@@ -237,27 +240,3 @@ class GetItemNode(BaseNode):
             return (array[index],)
         return (None,)
 
-
-class OutputToFileNode(BaseNode):
-    title = "Save To File"
-    CATEGORY = "General"
-    color = "#7a2d2d"
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "content": ("*", {}),
-                "out_path": ("STRING", {"default": "output.txt"}),
-            }
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("status",)
-
-    def execute(self, content, out_path: str, **kwargs):
-        try:
-            Path(out_path).write_text(str(content), encoding="utf-8")
-            return (f"Written → {out_path}",)
-        except Exception as exc:
-            return (f"Error: {exc}",)

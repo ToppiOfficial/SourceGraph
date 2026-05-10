@@ -2,7 +2,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget, 
                                 QHBoxLayout, QVBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem, QLabel, QPushButton)
 from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath, QLinearGradient)
-from PySide6.QtCore    import Qt, QRectF, QPointF, QSizeF
+from PySide6.QtCore    import Qt, QRectF, QPointF, QSizeF, QRect
 
 from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables
 from gui.theme import *
@@ -216,6 +216,7 @@ class NodeItem(QGraphicsItem):
         self.setAcceptDrops(True)
 
         self._is_resizing = False
+        self._fold_press_pos = None  # Track press position in fold indicator area
         node_default_w = getattr(node, 'default_width', None) or DEFAULT_W
         self._w = node.width if node.width is not None else node_default_w
 
@@ -288,13 +289,13 @@ class NodeItem(QGraphicsItem):
     def _calculate_height(self) -> float:
         if self.node.folded:
             # Calculate dynamic height based on arc spacing for folded nodes
-            visible_outputs = sum(1 for p in self.node.outputs.values() if p.visible)
-            visible_inputs = sum(1 for p in self.node.inputs.values() 
-                               if p.visible and p.allow_connection)
+            visible_outputs = sum(1 for p in self.node.outputs.values() if p.allow_connection)
+            visible_inputs = sum(1 for p in self.node.inputs.values()
+                               if p.allow_connection)
             return _folded_height(max(visible_outputs, visible_inputs))
         h = TITLE_H
         for p in self.node.outputs.values():
-            if p.visible or getattr(p, "label", None):
+            if p.allow_connection or getattr(p, "label", None):
                 h += ROW_H
         below_extra = 0
         for p in self.node.inputs.values():
@@ -303,10 +304,14 @@ class NodeItem(QGraphicsItem):
             full_row = getattr(p, 'full_row', False)
             below_flag = getattr(p, 'below_ports', False)
             port_rh = getattr(p, 'row_height', None) or ROW_H
-            if not (p.visible or is_editable or has_custom or full_row):
+            if not (is_editable or has_custom or full_row or p.allow_connection):
                 continue
-            if full_row:
+            if full_row and not p.allow_connection:
                 h += port_rh
+            elif full_row and p.allow_connection:
+                h += ROW_H
+                if is_editable or has_custom:
+                    below_extra += port_rh
             elif below_flag:
                 h += ROW_H
                 if is_editable or has_custom:
@@ -320,10 +325,10 @@ class NodeItem(QGraphicsItem):
         """Rows that participate in layout; used to detect port/widget structure drift."""
         rows: list[tuple[str, str]] = []
         for name, p in self.node.outputs.items():
-            if p.visible:
+            if p.allow_connection:
                 rows.append(("o", name))
         for name, p in self.node.inputs.items():
-            if p.visible or (p.port_type in _EDITABLE and p.editable) or self.node.has_gui_builder(name) or getattr(p, 'full_row', False):
+            if (p.port_type in _EDITABLE and p.editable) or self.node.has_gui_builder(name) or getattr(p, 'full_row', False) or p.allow_connection:
                 rows.append(("i", name))
         return tuple(rows)
 
@@ -337,9 +342,9 @@ class NodeItem(QGraphicsItem):
 
         if self.node.folded:
             # Use arc positioning for folded node ports
-            visible_outputs = [(n, p) for n, p in self.node.outputs.items() if p.visible]
+            visible_outputs = [(n, p) for n, p in self.node.outputs.items() if p.allow_connection]
             visible_inputs  = [(n, p) for n, p in self.node.inputs.items()
-                               if p.visible and p.allow_connection]
+                               if p.allow_connection]
 
             # Calculate arc-based height for positioning but keep node at TITLE_H
             arc_h = _folded_height(max(len(visible_outputs), len(visible_inputs)))
@@ -362,7 +367,7 @@ class NodeItem(QGraphicsItem):
 
         # Outputs first (top rows)
         for name, port in self.node.outputs.items():
-            if port.visible:
+            if port.allow_connection:
                 pi = PortItem(port, self)
                 pi.setPos(self._w, self._row_cy(row_idx))
                 self._port_items[name] = pi
@@ -379,18 +384,24 @@ class NodeItem(QGraphicsItem):
             below_flag = getattr(port, 'below_ports', False)
             port_rh = getattr(port, 'row_height', None) or ROW_H
 
-            if not port.visible and not is_editable and not has_custom and not full_row:
+            if not (is_editable or has_custom or full_row or port.allow_connection):
                 continue
 
-            if full_row:
-                # No port circle; widget spans full width
+            if full_row and not port.allow_connection:
+                # No port circle; widget spans full width (only if not connectable)
                 proxy = self._build_input_widget(name, port, current_y)
                 if proxy:
                     self._proxies[name] = proxy
                 current_y += port_rh
+            elif full_row and port.allow_connection:
+                pi = PortItem(port, self)
+                pi.setPos(0, current_y + ROW_H / 2)
+                self._port_items[name] = pi
+                if is_editable or has_custom:
+                    below_ports_queue.append((name, port))
+                current_y += ROW_H
             elif below_flag:
-                # Port circle in normal row; widget placed in pass 2
-                if port.visible and port.allow_connection:
+                if port.allow_connection:
                     pi = PortItem(port, self)
                     pi.setPos(0, current_y + ROW_H / 2)
                     self._port_items[name] = pi
@@ -398,7 +409,7 @@ class NodeItem(QGraphicsItem):
                     below_ports_queue.append((name, port))
                 current_y += ROW_H
             else:
-                if port.visible and port.allow_connection:
+                if port.allow_connection:
                     pi = PortItem(port, self)
                     pi.setPos(0, current_y + ROW_H / 2)
                     self._port_items[name] = pi
@@ -408,7 +419,6 @@ class NodeItem(QGraphicsItem):
                         self._proxies[name] = proxy
                 current_y += ROW_H
 
-        # Pass 2: below_ports widgets placed after all normal rows
         for name, port in below_ports_queue:
             port_rh = getattr(port, 'row_height', None) or ROW_H
             proxy = self._build_input_widget(name, port, current_y)
@@ -473,7 +483,6 @@ class NodeItem(QGraphicsItem):
         elif port.port_type == PortType.ENUM or port.enum_options is not None:
             # Dropdown/selection
             combo = QComboBox(parent)
-            combo.setFixedHeight(22)
             combo.setStyleSheet(NODE_COMBO_STYLE)
             
             # Populate options
@@ -680,8 +689,10 @@ class NodeItem(QGraphicsItem):
             self.node.on_property_changed()
 
         self._sync_connection_states()
+        for proxy in self._proxies.values():
+            proxy.update()
         self.update()
-    
+
     def _update_widget_value(self, widget: QWidget, port: Port):
         """Update widget value based on port type and widget type."""
         from PySide6.QtWidgets import QLineEdit, QComboBox, QPushButton, QTextEdit
@@ -874,9 +885,9 @@ class NodeItem(QGraphicsItem):
         """Keep output ports and proxy widgets aligned after a resize."""
         if self.node.folded:
             # In folded state, recalculate arc positions when width changes
-            visible_outputs = [(n, p) for n, p in self.node.outputs.items() if p.visible]
+            visible_outputs = [(n, p) for n, p in self.node.outputs.items() if p.allow_connection]
             visible_inputs  = [(n, p) for n, p in self.node.inputs.items()
-                               if p.visible and p.allow_connection]
+                               if p.allow_connection]
             
             # Calculate arc-based height for positioning but keep node at TITLE_H
             arc_h = _folded_height(max(len(visible_outputs), len(visible_inputs)))
@@ -976,9 +987,9 @@ class NodeItem(QGraphicsItem):
         # Use proportional roundness for folded nodes based on port count
         if self.node.folded:
             # Count visible ports
-            visible_outputs = sum(1 for p in self.node.outputs.values() if p.visible)
-            visible_inputs = sum(1 for p in self.node.inputs.values() 
-                               if p.visible and p.allow_connection)
+            visible_outputs = sum(1 for p in self.node.outputs.values() if p.allow_connection)
+            visible_inputs = sum(1 for p in self.node.inputs.values()
+                               if p.allow_connection)
             total_ports = max(visible_outputs, visible_inputs)
             
             # Mathematical ratio: map port count (1-10) to roundness (6-20)
@@ -1112,7 +1123,7 @@ class NodeItem(QGraphicsItem):
 
         visible_out_idx = 0
         for name, port in self.node.outputs.items():
-            if not port.visible:
+            if not port.allow_connection:
                 continue
             y = TITLE_H + visible_out_idx * ROW_H
             painter.setPen(label_col)
@@ -1132,11 +1143,12 @@ class NodeItem(QGraphicsItem):
             full_row = getattr(port, 'full_row', False)
             below_flag = getattr(port, 'below_ports', False)
             port_rh = getattr(port, 'row_height', None) or ROW_H
-            if not port.visible and not is_editable and not has_custom and not full_row:
+            if not is_editable and not has_custom and not full_row and not port.allow_connection:
                 continue
 
             if full_row:
-                # No label; widget spans the full row
+                # Widget spans full row; no label drawn (port circle still exists if connectable)
+                row_offset_y += ROW_H if port.allow_connection else 0
                 row_offset_y += port_rh
                 continue
 
@@ -1182,14 +1194,36 @@ class NodeItem(QGraphicsItem):
         return super().itemChange(change, value)
     
     def mousePressEvent(self, event):
-        """Handle clicks on the fold indicator area."""
+        """Track press in fold indicator area; defer fold decision to release."""
         if event.button() == Qt.LeftButton:
             fold_rect = self._get_fold_indicator_rect()
             if fold_rect.contains(event.pos()) and getattr(self.node, 'allow_folding', True):
-                self._toggle_fold()
+                self._fold_press_pos = event.pos()
                 event.accept()
                 return
+        self._fold_press_pos = None
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Clear fold intent if mouse moves beyond click threshold (~5px)."""
+        if self._fold_press_pos is not None:
+            delta = (event.pos() - self._fold_press_pos).manhattanLength()
+            if delta > 5:
+                self._fold_press_pos = None
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Toggle fold only if released near press position in fold area."""
+        if (event.button() == Qt.LeftButton and self._fold_press_pos is not None):
+            fold_rect = self._get_fold_indicator_rect()
+            delta = (event.pos() - self._fold_press_pos).manhattanLength()
+            if fold_rect.contains(event.pos()) and delta <= 5:
+                self._toggle_fold()
+                event.accept()
+                self._fold_press_pos = None
+                return
+            self._fold_press_pos = None
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         """Double-click no longer toggles fold - use the fold indicator instead."""

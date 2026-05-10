@@ -12,18 +12,40 @@ class PanelManager:
         self.panels: Dict[str, BasePanel] = {}
 
     def discover_and_load(self):
-        """Scans the gui/panels directory and loads all BasePanel subclasses."""
+        """Scans the gui/panels directory and loads all BasePanel subclasses.
+        Prioritizes ConsolePanel to capture errors during other panel initialization."""
         manager_path = os.path.abspath(__file__)
         panels_dir = os.path.dirname(manager_path)
 
+        # load and setup ConsolePanel early to capture startup errors 
+        console_panel_loaded = False
         for filename in sorted(os.listdir(panels_dir)):
-            if filename.endswith(".py") and filename not in ("base.py", "manager.py", "__init__.py", "base_panel.py", "graph_hierarchy.py"):
+            if filename == "console.py":
+                module_name = f"gui.panels.console"
+                try:
+                    module = importlib.import_module(module_name)
+                    for name, obj in inspect.getmembers(module):
+                        if (inspect.isclass(obj) and
+                            issubclass(obj, BasePanel) and
+                            obj is not BasePanel):
+                            self._instantiate_panel(obj)
+                            # Setup console panel immediately so it can capture errors
+                            panel = self.panels.get(obj.ID)
+                            if panel:
+                                panel.setup()
+                                console_panel_loaded = True
+                except Exception as e:
+                    print(f"Failed to load ConsolePanel early: {e}")
+
+        # load remaining panels
+        for filename in sorted(os.listdir(panels_dir)):
+            if filename.endswith(".py") and filename not in ("base.py", "manager.py", "__init__.py", "base_panel.py", "graph_hierarchy.py", "console.py"):
                 module_name = f"gui.panels.{filename[:-3]}"
                 try:
                     module = importlib.import_module(module_name)
                     for name, obj in inspect.getmembers(module):
-                        if (inspect.isclass(obj) and 
-                            issubclass(obj, BasePanel) and 
+                        if (inspect.isclass(obj) and
+                            issubclass(obj, BasePanel) and
                             obj is not BasePanel):
                             self._instantiate_panel(obj)
                 except Exception as e:
@@ -44,9 +66,10 @@ class PanelManager:
             log.error(f"Error instantiating panel {panel_class.__name__}: {e}")
 
     def initialize_all(self):
-        """Calls setup() on all loaded panels."""
+        """Calls setup() on all loaded panels except ConsolePanel (already initialized)."""
         for panel in self.panels.values():
-            panel.setup()
+            if panel.ID != "ConsoleDock":  # Skip ConsolePanel, already setup early
+                panel.setup()
 
     def get_panel(self, panel_id: str) -> BasePanel:
         return self.panels.get(panel_id)

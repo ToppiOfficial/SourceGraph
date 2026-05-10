@@ -54,7 +54,7 @@ class QCJoinNode(BaseNode):
     def INPUT_TYPES(cls):
         return {
             "optional": {
-                "command{n}": ("*", {"dynamic": True, "display_in_inspector": False}),
+                "command{n}": ("*", {"dynamic": True, "editable": False}),
             }
         }
 
@@ -65,37 +65,8 @@ class QCJoinNode(BaseNode):
         lines = []
         for k, v in kwargs.items():
             if k.startswith("command") and k[7:].isdigit() and v:
-                # Extract command string from dict if needed
                 if isinstance(v, dict) and "command" in v:
                     lines.append(str(v["command"]))
                 else:
                     lines.append(str(v))
         return ("\n".join(lines),)
-
-
-class MakeQCNode(BaseNode):
-    """Combines multiple QC commands into one block."""
-    title = "Make QC"
-    CATEGORY = QC_CATEGORY
-    color = "#7a2d2d"
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "command{n}": ("*", {"dynamic": True, "display_in_inspector": False}),
-            }
-        }
-
-    RETURN_TYPES = ("COMMAND",)
-    RETURN_NAMES = ("qc_text",)
-
-    def execute(self, **kwargs):
-        lines = []
-        for k, v in kwargs.items():
-            if k.startswith("command") and k[7:].isdigit() and v:
-                if isinstance(v, dict) and "command" in v:
-                    lines.append(str(v["command"]))
-                else:
-                    lines.append(str(v))
-        return ("\n".join(lines) + "\n",)

@@ -137,8 +137,10 @@ class BaseBrowserTree(QTreeWidget):
         item.setForeground(0, QColor(FG_BRIGHT))
         item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
         item.setExpanded(True)
-        # Set tooltip for folder showing its name
-        item.setToolTip(0, f"Folder: {name}")
+        try:
+            item.setToolTip(0, f"Folder: {name}")
+        except RuntimeError:
+            pass
         return item
 
 
