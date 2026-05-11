@@ -222,7 +222,7 @@ QDialog {{
 
 SEARCH_BAR_STYLE = f"""
 QLineEdit {{
-    background: {BG_DARK};
+    background: {BG_DARKER};
     color: {FG_BRIGHT};
     border: none;
     padding: 10px 12px;
@@ -250,6 +250,20 @@ QListWidget::item:selected {{
     font-weight: bold;
 }}
 QListWidget::item:hover {{
+    background: {BG_HOVER};
+}}
+QScrollBar:vertical {{
+    background: {BG_MED};
+    width: 6px;
+    border: none;
+    border-radius: 3px;
+}}
+QScrollBar::handle:vertical {{
+    background: {BG_SURFACE};
+    border-radius: 3px;
+    min-height: 15px;
+}}
+QScrollBar::handle:vertical:hover {{
     background: {BG_HOVER};
 }}
 """
@@ -461,8 +475,7 @@ DIALOG_RENAME_STYLE = f"""
 VIEW_CONTROLS_STYLE = f"""
     QWidget {{
         background-color: rgba(30, 30, 30, 230);
-        border: 1px solid {BORDER_DARK};
-        border-radius: 8px;
+        border: none;
     }}
     QPushButton {{
         background: transparent;
@@ -510,8 +523,7 @@ PREVIEW_SCROLL_STYLE = f"""
 
 PREVIEW_RENDER_CONTAINER_STYLE = f"""
     QFrame {{
-        background-color: {BG_DARK};
-        border: 1px solid {BORDER_DARK};
+        background-color: {BG_DARKER};
         border-radius: 8px;
     }}
 """

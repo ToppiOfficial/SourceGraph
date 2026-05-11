@@ -753,6 +753,24 @@ class ExecutionPanel(QWidget):
                 selected_count += 1
                 
         print(f"[Check Nodes] Selected {selected_count} nodes (including dependencies)")
+
+    def _add_selected_node(self):
+        if not self.current_session or not self.graph:
+            return
+            
+        mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
+        with mgr.transaction("Add to Execution") if mgr else nullcontext():
+            if self._scene:
+                from gui.items.node import NodeItem
+                selected = [item for item in self._scene.selectedItems() 
+                           if isinstance(item, NodeItem)]
+                for item in selected:
+                    self.current_session.add_node(item.node.id)
+            else:
+                for node_id in self.graph.nodes:
+                    self.current_session.add_node(node_id)
+            self._refresh_node_list()
+            self._sync_to_graph()
         
     def _remove_selected_nodes(self):
         if not self.current_session:

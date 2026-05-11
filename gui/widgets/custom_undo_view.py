@@ -49,7 +49,6 @@ class CustomUndoItemDelegate(QStyledItemDelegate):
     def __init__(self, parent_view):
         super().__init__(parent_view)
         self.parent_view = parent_view
-        self._icon_cache = {}
         
     def paint(self, painter, option, index):
         """Override paint to provide custom rendering."""
@@ -64,15 +63,9 @@ class CustomUndoItemDelegate(QStyledItemDelegate):
         else:
             painter.fillRect(option.rect, QColor(37, 37, 37))  # BG_MED
             
-        # Draw icon (centered vertically)
-        icon = self.get_action_icon(action_text)
-        icon_y = option.rect.top() + (option.rect.height() - 16) // 2
-        icon_rect = QRect(option.rect.left() + 8, icon_y, 16, 16)
-        icon.paint(painter, icon_rect)
-        
         # Draw text (centered vertically)
-        text_rect = QRect(option.rect.left() + 32, option.rect.top(), 
-                          option.rect.width() - 36, option.rect.height())
+        text_rect = QRect(option.rect.left() + 4, option.rect.top(), 
+                          option.rect.width() - 8, option.rect.height())
         
         formatted_text = self.format_action_text(action_text)
         
@@ -91,53 +84,6 @@ class CustomUndoItemDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         """Provide custom size hint for items."""
         return QSize(200, 20)  # Reduced height for more compact view
-        
-    def get_action_icon(self, action_text):
-        """Get appropriate icon based on action type."""
-        action_lower = action_text.lower()
-        
-        # Cache icons for performance
-        if action_text in self._icon_cache:
-            return self._icon_cache[action_text]
-            
-        icon = self._create_action_icon(action_lower)
-        self._icon_cache[action_text] = icon
-        return icon
-        
-    def _create_action_icon(self, action_text):
-        """Create icon based on action type using standardized shapes."""
-        # Create simple colored icons based on action type
-        pixmap = QPixmap(16, 16)
-        pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
-        
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Get standardized color and shape
-        color = get_color_for_action(action_text)
-        shape_name = get_shape_for_action(action_text)
-        
-        # Draw the shape using standardized methods
-        painter.setBrush(color)
-        painter.setPen(Qt.NoPen)
-        
-        # Map shape names to drawing methods
-        shape_methods = {
-            'plus': ShapeDrawer.draw_plus,
-            'minus': ShapeDrawer.draw_minus,
-            'arrow_right': ShapeDrawer.draw_arrow_right,
-            'triangle_right': ShapeDrawer.draw_triangle_right,
-            'triangle_down': ShapeDrawer.draw_triangle_down,
-            'line_horizontal': ShapeDrawer.draw_line_horizontal,
-            'circle': ShapeDrawer.draw_circle,
-            'square': ShapeDrawer.draw_square,
-        }
-        
-        draw_method = shape_methods.get(shape_name, ShapeDrawer.draw_square)
-        draw_method(painter, 0, 0, 16)
-            
-        painter.end()
-        return QIcon(pixmap)
         
     def format_action_text(self, action_text):
         """Format action text for better readability."""

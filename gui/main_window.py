@@ -20,6 +20,7 @@ from gui.theme import *
 from gui.logger import log, Level
 from gui.widgets.basic_shapes import ShapeDrawer, IconColors
 from gui.widgets.icon_provider import load_icon
+from gui.items.wire import ConnectionItem
 
 
 def create_icon(shape_func, color=IconColors.DEFAULT, size=16) -> QIcon:
@@ -237,6 +238,33 @@ class MainWindow(QMainWindow):
         
         # Time Unit Settings
         settings_menu.addSeparator()
+        
+        wire_group = QActionGroup(self)
+        wire_group.setExclusive(True)
+        
+        self.wire_spline_act = QAction("Wire Style: Spline", self)
+        self.wire_spline_act.setCheckable(True)
+        self.wire_spline_act.setChecked(ConnectionItem.wire_style == "spline")
+        self.wire_spline_act.triggered.connect(lambda: self._set_wire_style("spline"))
+        
+        self.wire_linear_act = QAction("Wire Style: Linear", self)
+        self.wire_linear_act.setCheckable(True)
+        self.wire_linear_act.setChecked(ConnectionItem.wire_style == "linear")
+        self.wire_linear_act.triggered.connect(lambda: self._set_wire_style("linear"))
+        
+        self.wire_straight_act = QAction("Wire Style: Straight", self)
+        self.wire_straight_act.setCheckable(True)
+        self.wire_straight_act.setChecked(ConnectionItem.wire_style == "straight")
+        self.wire_straight_act.triggered.connect(lambda: self._set_wire_style("straight"))
+        
+        wire_group.addAction(self.wire_spline_act)
+        wire_group.addAction(self.wire_linear_act)
+        wire_group.addAction(self.wire_straight_act)
+        settings_menu.addAction(self.wire_spline_act)
+        settings_menu.addAction(self.wire_linear_act)
+        settings_menu.addAction(self.wire_straight_act)
+        
+        settings_menu.addSeparator()
         time_group = QActionGroup(self)
         time_group.setExclusive(True)
 
@@ -264,6 +292,25 @@ class MainWindow(QMainWindow):
         settings_button.setMenu(settings_menu)
         settings_button.setPopupMode(QToolButton.InstantPopup)
         tb.addWidget(settings_button)
+
+    def _set_wire_style(self, style: str) -> None:
+        ConnectionItem.wire_style = style
+        
+        def refresh_scene(scene):
+            for conn, ci in scene._conn_items:
+                ci._refresh()
+                ci.update()
+            
+        refresh_scene(self.scene)
+        stack = [self._nav_root] if self._nav_root else []
+        while stack:
+            node = stack.pop()
+            if node.scene != self.scene:
+                refresh_scene(node.scene)
+            stack.extend(node.children.values())
+            
+        self._save_config()
+        log.info(f"Wire style set to: {style}")
 
     def _on_toggle_debug(self, enabled: bool) -> None:
         log.min_level = Level.DEBUG if enabled else Level.INFO
@@ -318,12 +365,12 @@ class MainWindow(QMainWindow):
 
         # Floating View Controls Bar
         self.view_controls = QWidget(self.view)
-        self.view_controls.setFixedHeight(40)
+        self.view_controls.setFixedHeight(30)
         self.view_controls.setStyleSheet(VIEW_CONTROLS_STYLE)
         
         ctrl_layout = QHBoxLayout(self.view_controls)
-        ctrl_layout.setContentsMargins(8, 0, 8, 0)
-        ctrl_layout.setSpacing(4)
+        ctrl_layout.setContentsMargins(4, 0, 4, 0)
+        ctrl_layout.setSpacing(2)
 
         # Navigation / Focus Button
         nav_btn = QPushButton("✜")
@@ -346,7 +393,7 @@ class MainWindow(QMainWindow):
         # Minimap Toggle
         ctrl_layout.addSpacing(8)
         self.minimap_toggle_btn = QPushButton()
-        self.minimap_toggle_btn.setIcon(create_icon(ShapeDrawer.draw_map, IconColors.DEFAULT, 14))
+        self.minimap_toggle_btn.setIcon(load_icon("windowapp"))
         self.minimap_toggle_btn.setCheckable(True)
         self.minimap_toggle_btn.setChecked(True)
         self.minimap_toggle_btn.setToolTip("Toggle Minimap")
@@ -356,7 +403,7 @@ class MainWindow(QMainWindow):
         # Minimap Options
         ctrl_layout.addSpacing(4)
         self.minimap_colors_btn = QPushButton()
-        self.minimap_colors_btn.setIcon(create_icon(ShapeDrawer.draw_palette, IconColors.CONNECT, 14))
+        self.minimap_colors_btn.setIcon(load_icon("twotone_circle"))
         self.minimap_colors_btn.setCheckable(True)
         self.minimap_colors_btn.setChecked(True)
         self.minimap_colors_btn.setToolTip("Toggle Node Colors in Minimap")
@@ -426,12 +473,14 @@ class MainWindow(QMainWindow):
     def _save_config(self) -> None:
         """Save application configuration (recent files, last project, path stack)."""
         try:
+            from gui.items.wire import ConnectionItem
             config_path = self._get_config_path()
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             config_data = {
                 "recent_files": self._recent_files,
                 "last_project": self._project_path,
                 "time_unit": self.graph.time_unit,
+                "wire_style": ConnectionItem.wire_style,
                 "minimap": self.get_external_state().get("minimap", {})
             }
             with open(config_path, 'w') as f:
@@ -457,6 +506,15 @@ class MainWindow(QMainWindow):
             if hasattr(self, "unit_ms_act"):
                 self.unit_ms_act.setChecked(unit == "ms")
                 self.unit_s_act.setChecked(unit == "s")
+
+            # Load Wire Style
+            from gui.items.wire import ConnectionItem
+            style = config_data.get("wire_style", "spline")
+            ConnectionItem.wire_style = style
+            if hasattr(self, "wire_spline_act"):
+                self.wire_spline_act.setChecked(style == "spline")
+                self.wire_linear_act.setChecked(style == "linear")
+                self.wire_straight_act.setChecked(style == "straight")
                 
             if "last_project" in config_data and len(sys.argv) <= 1:
                 # Fallback for old config format
@@ -606,8 +664,8 @@ class MainWindow(QMainWindow):
         minimap_height = minimap_size.height()
         
         # Position Minimap at bottom right with margin
-        margin_x = 10
-        margin_y = 50   
+        margin_x = 8
+        margin_y = 40   
         minimap_x = w - minimap_width - margin_x
         minimap_y = h - minimap_height - margin_y
         self.minimap_widget.move(minimap_x, minimap_y)

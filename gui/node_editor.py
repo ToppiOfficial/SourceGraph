@@ -51,10 +51,10 @@ class MinimapWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        bg_color = QColor(30, 30, 30, 220)
+        bg_color = QColor(0, 0, 0, 80)
         painter.setBrush(bg_color)
-        painter.setPen(QPen(QColor(MINIMAP_BORDER), 1))
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
+        painter.setPen(QPen(QColor(bg_color), 1))
+        painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
 
         scene = self.view.scene()
         if scene is None:
@@ -102,14 +102,21 @@ class MinimapWidget(QWidget):
                         sp = src_ni.port_item(conn.src_port)
                         dp = dst_ni.port_item(conn.dst_port)
                         if sp and dp:
-                            # Draw Bezier curve like the main editor
                             s = sp.scene_center()
                             e = dp.scene_center()
-                            dx = max(abs(e.x() - s.x()) * 0.5, 60.0)
                             
-                            # Create path for Bezier curve
                             path = QPainterPath(s)
-                            path.cubicTo(s + QPointF(dx, 0), e - QPointF(dx, 0), e)
+                            if ConnectionItem.wire_style == "linear":
+                                path.lineTo(e)
+                            elif ConnectionItem.wire_style == "straight":
+                                mid_x = s.x() + (e.x() - s.x()) * 0.5
+                                path.lineTo(mid_x, s.y())
+                                path.lineTo(mid_x, e.y())
+                                path.lineTo(e)
+                            else:
+                                dx = max(abs(e.x() - s.x()) * 0.5, 60.0)
+                                path.cubicTo(s + QPointF(dx, 0), e - QPointF(dx, 0), e)
+                            
                             painter.drawPath(path)
 
         # Draw Nodes
@@ -144,7 +151,7 @@ class MinimapWidget(QWidget):
         """Draw the close 'X'."""
         # Close icon (top right)
         painter.setPen(QColor(200, 200, 200))
-        x_rect = QRectF(self.width() - 22, 8, 14, 14)
+        x_rect = QRectF(self.width() - 22, 8, 10, 10)
         painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
         painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
 

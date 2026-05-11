@@ -139,3 +139,18 @@ class PrintNode(BaseNode):
             return display
 
         self.register_gui_builder("value", create_print_display)
+
+class ConcatenateStrings(BaseNode):
+    title = "Concatenate String"
+    CATEGORY = "Primitives"
+    color = "#4ec9b0"
+
+    separator = OptIn("STRING", default="")
+    items = DynIn(prefix="item", editable=False)
+    output = Out("STRING")
+
+    def execute(self, separator: str, **kwargs):
+        items = []
+        items.extend(self.collect_dynamic("item", kwargs))
+        sep = separator.replace("\\n", "\n")
+        return (sep.join(str(i) for i in items),)

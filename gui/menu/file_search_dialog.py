@@ -49,7 +49,6 @@ class _AssetSearchBase(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
         self.setFixedSize(800, 480)
-        self.setStyleSheet(ENHANCED_MENU_STYLE)
         self.selected_file = None
 
         main = QVBoxLayout(self)
@@ -89,7 +88,7 @@ class _AssetSearchBase(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(PREVIEW_SCROLL_STYLE)
+        scroll.setStyleSheet(PREVIEW_RENDER_CONTAINER_STYLE)
         self._pcontent = QWidget()
         self._pcontent.setStyleSheet("background: transparent;")
         self.preview_layout = QVBoxLayout(self._pcontent)

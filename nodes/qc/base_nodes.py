@@ -29,9 +29,9 @@ class CDMaterialsNode(BaseNode):
         return (f'$cdmaterials "{path}"',)
 
 
-class QCJoinNode(BaseNode):
+class ConcatenateQCcommands(BaseNode):
     """Joins multiple QC commands into one."""
-    title = "QC Join"
+    title = "Concatenate QC commands"
     CATEGORY = QC_CATEGORY
     color = "#7a2d2d"
     body_color = "#2b1010"

@@ -50,18 +50,8 @@ class GraphMapNodeItem(NodeItem):
 
 
 
-class SharpConnectionItem(ConnectionItem):
-    """Connection item with sharp right-angle paths instead of bezier curves."""
-    def _refresh(self):
-        s, e = self.src, self.dst
-        path = QPainterPath(s)
-        mid_x = (s.x() + e.x()) / 2
-        path.lineTo(mid_x, s.y())
-        path.lineTo(e)
-        self.setPath(path)
-
 class GraphMapScene(NodeEditorScene):
-    """Custom scene for graph map that uses sharp connection wires and larger headers."""
+    """Custom scene for graph map that uses straight connection wires and larger headers."""
     def load_from_graph(self):
         with self._undo_manager.skip_undo():
             self.clear()
@@ -94,7 +84,6 @@ class GraphMapScene(NodeEditorScene):
         super().mousePressEvent(event)
 
     def _materialise_conn(self, conn):
-        from core.graph import Connection
         src_ni = self._node_items.get(conn.src_node)
         dst_ni = self._node_items.get(conn.dst_node)
         if not (src_ni and dst_ni):
@@ -103,7 +92,12 @@ class GraphMapScene(NodeEditorScene):
         dp = dst_ni.port_item(conn.dst_port)
         if not (sp and dp):
             return None
-        ci = SharpConnectionItem(sp.scene_center(), dp.scene_center())
+        
+        old_style = ConnectionItem.wire_style
+        ConnectionItem.wire_style = "straight"
+        ci = ConnectionItem(sp.scene_center(), dp.scene_center())
+        ConnectionItem.wire_style = old_style
+        
         self._conn_items.append((conn, ci))
         self.addItem(ci)
         dst_ni.set_port_connected(conn.dst_port, True, sp.port.port_type)
