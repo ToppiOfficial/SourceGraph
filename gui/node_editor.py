@@ -23,7 +23,7 @@ from core.recent_nodes import add_recent_node
 from gui.widgets.icon_provider import load_pixmap
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
-from nodes.subgraph.subgraph_node import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
+from nodes.subgraph.subgraph import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
 from gui.items.node       import NodeItem, ResizeHandle, PortItem, DEFAULT_W
 from gui.items.wire import ConnectionItem
 from gui.dialogs import RenameDialog

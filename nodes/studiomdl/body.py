@@ -1,6 +1,6 @@
 from __future__ import annotations
 from core.node import BaseNode, In, DynIn, Out
-from nodes.qc.shared_categories import RENDERMESH_PARAMETER_CATEGORY, QC_CATEGORY
+from nodes.studiomdl.shared import RENDERMESH_PARAMETER_CATEGORY, QC_CATEGORY
 
 
 class BodyNode(BaseNode):

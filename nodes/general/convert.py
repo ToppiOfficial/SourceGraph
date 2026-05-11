@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from core.node import BaseNode, In, Out, OptIn
+from core.node import BaseNode, In, Out, OptIn, DynIn
 
 class ConverterNode:
     CATEGORY = "Converters"
@@ -20,6 +20,7 @@ class ToStringNode(ConverterNode, BaseNode):
             return ("",)
         return (str(value),)
 
+
 class ToIntNode(ConverterNode, BaseNode):
     """Converts a value to an integer. Handles float strings and rounding."""
     title = "To Integer"
@@ -34,6 +35,7 @@ class ToIntNode(ConverterNode, BaseNode):
         except (ValueError, TypeError):
             return (0,)
 
+
 class ToFloatNode(ConverterNode, BaseNode):
     """Converts a value to a floating point number."""
     title = "To Float"
@@ -47,6 +49,7 @@ class ToFloatNode(ConverterNode, BaseNode):
         except (ValueError, TypeError):
             return (0.0,)
 
+
 class ToBoolNode(ConverterNode, BaseNode):
     """Converts a value to a boolean using Python's default truthiness logic."""
     title = "To Boolean"
@@ -57,6 +60,7 @@ class ToBoolNode(ConverterNode, BaseNode):
     def execute(self, value, **kwargs):
         # Python's bool() handles None as False, 0 as False, empty containers as False
         return (bool(value),)
+
 
 class ToDictNode(ConverterNode, BaseNode):
     """Parses a JSON string into a dictionary object."""
@@ -73,6 +77,7 @@ class ToDictNode(ConverterNode, BaseNode):
             return (res if isinstance(res, dict) else {},)
         except Exception:
             return ({},)
+
 
 class ToListNode(ConverterNode, BaseNode):
     """Converts a value to a list. Parses JSON strings or wraps single items."""
@@ -97,6 +102,7 @@ class ToListNode(ConverterNode, BaseNode):
         else:
             return ([value],)
 
+
 class LengthNode(ConverterNode, BaseNode):
     """Returns the count of items in a list or characters in a string."""
     title = "Length"
@@ -109,6 +115,7 @@ class LengthNode(ConverterNode, BaseNode):
             return (len(value),)
         except (TypeError, ValueError):
             return (0,)
+
 
 class RoundNode(ConverterNode, BaseNode):
     """Rounds a number to the specified decimal places."""
@@ -126,6 +133,7 @@ class RoundNode(ConverterNode, BaseNode):
         except (ValueError, TypeError):
             return (0,)
 
+
 class AbsoluteNode(ConverterNode, BaseNode):
     """Returns the absolute (positive) value of a number."""
     title = "Absolute"
@@ -139,6 +147,7 @@ class AbsoluteNode(ConverterNode, BaseNode):
         except (ValueError, TypeError):
             return (0.0,)
 
+
 class PathNormalizeNode(ConverterNode, BaseNode):
     """Normalizes a file path, ensuring consistent separators."""
     title = "Normalize Path"
@@ -150,6 +159,7 @@ class PathNormalizeNode(ConverterNode, BaseNode):
         if not path:
             return ("",)
         return (os.path.normpath(str(path)).replace("\\", "/"),)
+
 
 class StringSplitNode(ConverterNode, BaseNode):
     """Splits a string into a list using a specified separator."""
@@ -165,6 +175,7 @@ class StringSplitNode(ConverterNode, BaseNode):
         if not separator:
             return (text.split(),)
         return (text.split(separator),)
+
 
 class RegexMatchNode(ConverterNode, BaseNode):
     """Finds all occurrences of a regex pattern in a string."""
@@ -183,6 +194,7 @@ class RegexMatchNode(ConverterNode, BaseNode):
         except re.error:
             return ([],)
 
+
 class RegexReplaceNode(ConverterNode, BaseNode):
     """Replaces occurrences of a regex pattern with a replacement string."""
     title = "Regex Replace"
@@ -200,3 +212,19 @@ class RegexReplaceNode(ConverterNode, BaseNode):
             return (res,)
         except re.error:
             return (text,)
+
+
+class ConcatenateStrings(BaseNode):
+    title = "Concatenate String"
+    CATEGORY = "Primitives"
+    color = "#4ec9b0"
+
+    separator = OptIn("STRING", default="")
+    items = DynIn(prefix="item", editable=False)
+    output = Out("STRING")
+
+    def execute(self, separator: str, **kwargs):
+        items = []
+        items.extend(self.collect_dynamic("item", kwargs))
+        sep = separator.replace("\\n", "\n")
+        return (sep.join(str(i) for i in items),)

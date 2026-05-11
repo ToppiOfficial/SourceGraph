@@ -158,26 +158,82 @@ class SessionNode(BaseNode):
     color = "#6272a4"
     locked_title = True
 
-    session_name = In("STRING", default="", allow_connection=False, full_row=True)
+    session_item = In("ENUM", default="", allow_connection=False, full_row=True, graph_enum="session_items")
     session      = Out("STRING")
 
+    def __init__(self):
+        super().__init__()
+        self.custom_name = None
+
+    def _get_clean_name(self, val: str) -> str:
+        """Resolve the clean name (custom or title) from session_name|node_id."""
+        if not val or "|" not in val:
+            return ""
+        
+        parts = val.split("|", 1)
+        if len(parts) < 2:
+            return ""
+        s_name, node_id = parts
+
+        if not self.graph:
+            return ""
+
+        exec_data = getattr(self.graph, "execution_sessions", None)
+        if not exec_data:
+            return ""
+
+        sessions_list = []
+        if isinstance(exec_data, dict):
+            sessions_list = exec_data.get("sessions", [])
+        elif isinstance(exec_data, list):
+            sessions_list = exec_data
+
+        for s_data in sessions_list:
+            if s_data.get("name") == s_name:
+                custom = s_data.get("node_names", {}).get(node_id)
+                if custom:
+                    return custom
+                break
+        
+        # Fallback to node title in graph
+        node = self.graph.nodes.get(node_id)
+        if node:
+            return node.title
+
+        return ""
+
     def on_property_changed(self):
-        port = self.inputs.get("session_name")
-        name = port.value if port and port.value else ""
+        self.custom_name = None
+
+        port = self.inputs.get("session_item")
+        val = port.value if port and port.value else ""
+        name = self._get_clean_name(val)
+        
+        if val and not name:
+            port.value = ""
+            val = ""
+
         self.title = name if name else "Session"
+
         if hasattr(self, '_session_label'):
             try:
-                self._session_label.setText(name if name else "Select session…")
+                text = name if name else "Select session…"
+                self._session_label.setText(text)
+                
+                # If the widget is part of a proxy, it might need a repaint
+                if self._session_label.parentWidget():
+                    self._session_label.parentWidget().update()
             except RuntimeError:
                 pass
 
     def create_widget_for_port(self, port):
-        if port.name != "session_name":
+        if port.name != "session_item":
             return None
         from gui.widgets.node_widgets import make_file_picker
-        label_text = port.value if port.value else "Select session…"
+        val = port.value if port and port.value else ""
+        name = self._get_clean_name(val)
+        label_text = name if name else "Select session…"
         container, self._session_label = make_file_picker(label_text, self._show_session_dialog)
-        self._session_name_port = port
         return container
 
     def _show_session_dialog(self):
@@ -191,14 +247,11 @@ class SessionNode(BaseNode):
         if dialog.exec() == SessionSearchDialog.Accepted and dialog.selected_session:
             self._set_session(dialog.selected_session)
 
-    def _set_session(self, name: str) -> None:
-        if hasattr(self, '_session_name_port'):
-            self._session_name_port.value = name
-        if hasattr(self, '_session_label'):
-            try:
-                self._session_label.setText(name)
-            except RuntimeError:
-                pass
+    def _set_session(self, val: str) -> None:
+        port = self.inputs.get("session_item")
+        if port:
+            port.value = val
+        
         self.on_property_changed()
         if self.graph:
             self.graph.commit_change("Change Session")
@@ -206,15 +259,17 @@ class SessionNode(BaseNode):
             if scene:
                 item = getattr(scene, '_node_items', {}).get(self.id)
                 if item:
+                    # Trigger a deep refresh to ensure widgets are correctly synced
                     item.refresh_ports()
+                    item.update()
 
-    def execute(self, session_name: str, **kwargs):
-        return (session_name,)
+    def execute(self, session_item: str, **kwargs):
+        return (self._get_clean_name(session_item),)
 
 
-class ReadFile(BaseNode):
+class ReadFileNode(BaseNode):
     """Reads and returns the raw content of a file."""
-    title = "ReadFile"
+    title = "Read File"
     CATEGORY = "General"
     color = "#ce9178"
 
@@ -235,14 +290,15 @@ class ReadFile(BaseNode):
                 return (f.read(),)
 
 
-class OutputToFileNode(BaseNode):
-    title = "Save To File"
+class OutputFileNode(BaseNode):
+    title = "Export To File"
     CATEGORY = "General"
     color = "#7a2d2d"
     locked_title = True
 
     out_path = In("STRING", default="", full_row=True, allow_connection=False)
     content  = OptIn("ANY", editable=False)
+    file     = Out("FILE")
 
     def on_property_changed(self):
         port = self.inputs.get("out_path")
@@ -287,3 +343,5 @@ class OutputToFileNode(BaseNode):
             log.info(f"Written -> {out_path}")
         except Exception as exc:
             log.error(f"Error: {exc}")
+
+        return (out_path,)

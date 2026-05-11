@@ -1,6 +1,6 @@
 from __future__ import annotations
 from core.node import BaseNode, In, DynIn, Out
-from nodes.qc.shared_categories import QC_CATEGORY
+from nodes.studiomdl.shared import QC_CATEGORY
 
 
 class ModelNameNode(BaseNode):

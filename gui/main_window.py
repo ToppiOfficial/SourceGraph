@@ -7,7 +7,7 @@ import time
 import faulthandler
 import traceback
 from pathlib import Path
-from PySide6.QtWidgets import (QMainWindow, QFileDialog, QToolBar, QStatusBar, QMessageBox, QMenu, QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QPushButton)
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QToolBar, QStatusBar, QMessageBox, QMenu, QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 from PySide6.QtGui     import QAction, QKeySequence, QIcon, QPixmap, QPainter, QActionGroup
 from PySide6.QtCore    import Qt, QSize, QByteArray, QEvent, QTimer
 from dataclasses import dataclass, field
@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
         self._apply_initial_layout()
 
         self._build_statusbar()
+        self._update_status_right()
         self.scene.graph_changed.connect(self._on_changed)
         
         default_ws = self._get_default_workspace_path()
@@ -716,12 +717,21 @@ class MainWindow(QMainWindow):
                 assets.refresh_status()
         super().changeEvent(event)
 
+    def _update_status_right(self) -> None:
+        if not hasattr(self, "_status_right"):
+            return
+        n = len(self.graph.nodes) if self.graph else 0
+        c = len(self.graph.connections) if self.graph else 0
+        self._status_right.setText(f"{n} nodes  {c} wires")
+
     def _build_statusbar(self) -> None:
         sb = QStatusBar()
         self.setStatusBar(sb)
-        sb.showMessage(
-            "Right-click → add node  |  Middle-drag → pan  |  Scroll → zoom  |  Del → delete"
-        )
+
+        self._status_right = QLabel()
+        self._status_right.setStyleSheet("padding-right: 8px; background: transparent;")
+        sb.addPermanentWidget(self._status_right)
+        self._update_status_right()
 
     #  slots 
 
@@ -769,8 +779,7 @@ class MainWindow(QMainWindow):
                 child_path = os.path.abspath(curr.path) if curr.path else ""
 
         self.panel_manager.update_context(self.graph, self.scene)
-        n, c = len(self.graph.nodes), len(self.graph.connections)
-        self.statusBar().showMessage(f"{n} nodes   {c} connections")
+        self._update_status_right()
 
     def _on_scene_selection_changed(self) -> None:
         inspector = self.panel_manager.get_widget("NodeInspectorDock")
@@ -944,6 +953,7 @@ class MainWindow(QMainWindow):
                     exec_p.set_project_state(self.graph.execution_sessions)
             
             self._update_window_title()
+            self._update_status_right()
         finally:
             # Re-enable updates on all relevant views
             self.view.viewport().setUpdatesEnabled(True)
@@ -1078,6 +1088,7 @@ class MainWindow(QMainWindow):
                 exec_p.set_project_state(new_graph.execution_sessions)
             
             self._dirty = False
+            self._update_status_right()
             self.statusBar().showMessage(f"Loaded {path}")
 
             missing = [p for p in new_graph.assets if not os.path.exists(p)]

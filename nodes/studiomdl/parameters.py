@@ -1,5 +1,5 @@
 from core.node import BaseNode, In, Out
-from nodes.qc.shared_categories import RENDER_SETTING_CATEGORY
+from nodes.studiomdl.shared import RENDER_SETTING_CATEGORY
 
 class MaxVerts(BaseNode):
     """Generates $maxverts QC command."""

@@ -539,6 +539,7 @@ class SessionSearchDialog(QDialog):
         self.setFixedSize(300, 400)
         self.setStyleSheet(ENHANCED_MENU_STYLE)
         self.selected_session: str | None = None
+        self._session_data: dict[str, str] = {}
 
         try:
             mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
@@ -559,11 +560,15 @@ class SessionSearchDialog(QDialog):
                                 name = f"{custom} ({node_title})"
                             else:
                                 name = f"{node_title} ({node_class})" if len(node_title) < 40 else node_title
+                            
+                            clean = f"{session.name}|{node_id}"
                         elif custom:
                             name = custom
+                            clean = f"{session.name}|{node_id}"
                         else:
                             continue
                         self._sessions.append(name)
+                        self._session_data[name] = clean
         except Exception:
             self._sessions = []
 
@@ -615,7 +620,8 @@ class SessionSearchDialog(QDialog):
     def accept(self):
         item = self.item_list.currentItem()
         if item:
-            self.selected_session = item.text()
+            display_name = item.text()
+            self.selected_session = self._session_data.get(display_name, display_name)
         super().accept()
 
     def showEvent(self, event):

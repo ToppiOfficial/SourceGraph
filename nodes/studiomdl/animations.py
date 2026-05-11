@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 from core.node import BaseNode, In, Out
-from nodes.qc.shared_categories import QC_CATEGORY
+from nodes.studiomdl.shared import QC_CATEGORY
 
 class SequenceNode(BaseNode):
     """Generates $sequence QC command."""
