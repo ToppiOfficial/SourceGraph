@@ -56,12 +56,7 @@ class NodeSearchDialog(QDialog):
         self.node_preview_widget = QFrame(self)
         self.node_preview_widget.setFixedWidth(280)
         self.node_preview_widget.setFrameShape(QFrame.StyledPanel)
-        self.node_preview_widget.setStyleSheet(f"""
-            QFrame {{
-                background-color: {BG_DARK};
-                border-left: 1px solid {BORDER_DARK};
-            }}
-        """)
+        self.node_preview_widget.setStyleSheet(PREVIEW_RENDER_CONTAINER_STYLE)
         
         # Main layout for the preview panel
         self.preview_main_layout = QVBoxLayout(self.node_preview_widget)
@@ -72,12 +67,7 @@ class NodeSearchDialog(QDialog):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_area.setStyleSheet(f"""
-            QScrollArea {{ background: transparent; border: none; }}
-            QScrollBar:vertical {{ background: transparent; width: 6px; border: none; }}
-            QScrollBar::handle:vertical {{ background: {BG_SURFACE}; border-radius: 3px; min-height: 20px; }}
-            QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
-        """)
+        self.scroll_area.setStyleSheet(PREVIEW_SCROLL_STYLE)
         
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background: transparent;")
@@ -232,13 +222,7 @@ class NodeSearchDialog(QDialog):
         node_class = current_item.data(Qt.UserRole)
 
         render_container = QFrame()
-        render_container.setStyleSheet(f"""
-            QFrame {{
-                background-color: {BG_DARK};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 8px;
-            }}
-        """)
+        render_container.setStyleSheet(PREVIEW_RENDER_CONTAINER_STYLE)
         render_layout = QVBoxLayout(render_container)
         render_layout.setContentsMargins(4, 4, 4, 4)
 

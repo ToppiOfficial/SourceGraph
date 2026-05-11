@@ -2,7 +2,8 @@ from __future__ import annotations
 import os
 from typing import Any
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget, 
-                                QHBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem)
+                                QHBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem,
+                                QPushButton)
 from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath)
 from PySide6.QtCore    import Qt, QRectF, QPointF
 
@@ -488,13 +489,11 @@ class NodeItem(QGraphicsItem):
     
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
-        from PySide6.QtWidgets import QLineEdit, QComboBox, QPushButton
-        from gui.theme import NODE_WIDGET_STYLE, NODE_BOOL_STYLE
-        
+
         if port.port_type == PortType.BOOL:
             toggle = QPushButton(parent)
             toggle.setFixedHeight(20)
-            toggle.setText(f"< {'True' if bool(port.value) else 'False'} >")
+            toggle.setText(f"{'True' if bool(port.value) else 'False'}")
             toggle.setStyleSheet(NODE_BOOL_STYLE)
             toggle.setFocusPolicy(Qt.NoFocus)
             return toggle
@@ -516,13 +515,7 @@ class NodeItem(QGraphicsItem):
             container = QWidget(parent)
             container.setFixedHeight(22)
             container.setObjectName("NumberInputContainer")
-            container.setStyleSheet(f"""
-                #NumberInputContainer {{
-                    background-color: {BG_DARK};
-                    border: 1px solid {BORDER_LIGHT};
-                    border-radius: 3px;
-                }}
-            """)
+            container.setStyleSheet(NUMBER_INPUT_STYLE)
             
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -783,7 +776,7 @@ class NodeItem(QGraphicsItem):
                 widget.setText(_elide(str(raw) if raw is not None else "Select...", 25))
             else:
                 is_true = str(raw).lower() in ("true", "1", "yes")
-                widget.setText(f"< {'True' if is_true else 'False'} >")
+                widget.setText(f"{'True' if is_true else 'False'}")
 
     def _connect_widget_events(self, name: str, widget: QWidget):
         """Connect widget events to handle value changes."""

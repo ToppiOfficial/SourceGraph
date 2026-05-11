@@ -1,9 +1,5 @@
 from __future__ import annotations
-from core.node import (
-    BaseNode, In, OptIn, Out, DynIn,
-    string_in, int_in, float_in, bool_in, any_in, dyn_in,
-    string_out, int_out, float_out, bool_out, array_out, any_out,
-)
+from core.node import BaseNode, In, OptIn, Out, DynIn
 
 
 class StringNode(BaseNode):
@@ -89,7 +85,7 @@ class GetItemNode(BaseNode):
 
     array = In("ARRAY")
     index = In("INT", default=0)
-    item  = Out("*")
+    item  = Out("ANY")
 
     def execute(self, array: list, index: int = 0, **kwargs):
         if isinstance(array, list) and 0 <= index < len(array):
@@ -103,8 +99,8 @@ class PrintNode(BaseNode):
     color = "#6272a4"
     default_width = 200
 
-    value       = OptIn("*", full_row=True, row_height=100, row_stretch=True, below_ports=True)
-    passthrough = Out("*")
+    value       = OptIn("ANY", full_row=True, row_height=100, row_stretch=True, below_ports=True)
+    passthrough = Out("ANY")
 
     def __init__(self):
         super().__init__()

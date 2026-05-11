@@ -423,7 +423,7 @@ class ExecutionPanel(QWidget):
         # Rename field row
         rename_layout = QHBoxLayout()
         self.session_rename_edit = QLineEdit()
-        self.session_rename_edit.setStyleSheet(SEARCH_BAR_STYLE)
+        self.session_rename_edit.setStyleSheet(INPUT_STYLE)
         self.session_rename_edit.textEdited.connect(self._on_session_name_changed)
         self.session_rename_edit.editingFinished.connect(self._on_rename_editing_finished)
         rename_layout.addWidget(self.session_rename_edit, 1)
@@ -446,13 +446,9 @@ class ExecutionPanel(QWidget):
         layout.addWidget(QLabel("Execution Order:"))
         layout.addWidget(self.node_list)
         
-        # Add node button
-        self.btn_add_node = QPushButton("Add Selected Node")
-        self.btn_add_node.clicked.connect(self._add_selected_node)
-        layout.addWidget(self.btn_add_node)
-        
         # Execute button
         self.btn_execute = QPushButton("Execute")
+        self.btn_execute.setStyleSheet(BTN_STYLE)
         self.btn_execute.clicked.connect(self._execute_current)
         layout.addWidget(self.btn_execute)
         
@@ -734,25 +730,7 @@ class ExecutionPanel(QWidget):
         with mgr.transaction("Reorder Execution Items") if mgr else nullcontext():
             self.current_session.node_ids = new_order
             self._sync_to_graph()
-                
-    def _add_selected_node(self):
-        if not self.current_session or not self.graph:
-            return
-            
-        mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
-        with mgr.transaction("Add to Execution") if mgr else nullcontext():
-            if self._scene:
-                from gui.items.node import NodeItem
-                selected = [item for item in self._scene.selectedItems() 
-                           if isinstance(item, NodeItem)]
-                for item in selected:
-                    self.current_session.add_node(item.node.id)
-            else:
-                for node_id in self.graph.nodes:
-                    self.current_session.add_node(node_id)
-            self._refresh_node_list()
-            self._sync_to_graph()
-        
+
     def _check_nodes(self, node_ids: list[str]):
         """Select nodes and their dependencies in the scene."""
         if not self.graph or not self._scene:

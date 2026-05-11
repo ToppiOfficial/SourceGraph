@@ -80,6 +80,7 @@ def _render_svg(path: Path, size: QSize, color: QColor | None) -> QPixmap:
     return pixmap
 
 
+@lru_cache(maxsize=128)
 def load_pixmap(
     name: str,
     size: int | QSize | None = None,

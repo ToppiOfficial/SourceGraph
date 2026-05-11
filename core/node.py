@@ -70,7 +70,6 @@ class Port:
             return False
         if self.port_type == PortType.ANY or other.port_type == PortType.ANY:
             return True
-        
         return self.port_type == other.port_type
 
 
@@ -78,6 +77,7 @@ def port_uses_graph_variables(port: Port) -> bool:
     return port.graph_enum == "variables" or (
         port.graph_enum is None and port.name == "var_name"
     )
+
 
 TYPE_MAP: dict[str, PortType] = {
     "*": PortType.ANY,
@@ -103,38 +103,19 @@ TYPE_MAP: dict[str, PortType] = {
 }
 
 
-def parse_type(type_spec: str | tuple) -> PortType:
-    if isinstance(type_spec, PortType):
-        return type_spec
-    
-    if isinstance(type_spec, tuple):
-        type_name = type_spec[0]
-        if isinstance(type_name, PortType):
-            return type_name
-        type_spec = type_name
-    
-    if isinstance(type_spec, str):
-        type_lower = type_spec.lower()
-        if type_lower in TYPE_MAP:
-            return TYPE_MAP[type_lower]
-    
-    return PortType.ANY
+def parse_type(type_str: str) -> PortType:
+    return TYPE_MAP.get(type_str.lower(), PortType.ANY)
 
 
-def get_type_config(type_spec: str | tuple) -> dict:
-    if isinstance(type_spec, tuple) and len(type_spec) > 1:
-        config = type_spec[1]
-        if isinstance(config, dict):
-            return config.copy()
-    return {}
-
+# ---------------------------------------------------------------------------
+# PortSpec declarations — the only way to define ports on a node
+# ---------------------------------------------------------------------------
 
 class PortSpec:
-    """Lightweight port declaration marker placed on BaseNode subclass bodies.
+    """Port declaration placed on BaseNode subclass bodies.
 
-    Collected by _collect_port_specs() during class creation and used to
-    auto-generate INPUT_TYPES / RETURN_TYPES. Instances are removed from
-    the class dict after collection so they don't shadow instance attrs.
+    Collected by _collect_port_specs() during class creation.
+    Instances are removed from the class dict after collection.
     """
     _is_required: bool = True
     _is_input:    bool = True
@@ -174,9 +155,6 @@ class PortSpec:
         if step is not None:             cfg["step"] = step
         self._cfg = cfg
 
-    def as_tuple(self) -> tuple:
-        return (self.type_str, self._cfg)
-
 
 class In(PortSpec):
     """Required input port declaration."""
@@ -191,12 +169,7 @@ class OptIn(PortSpec):
 
 
 class DynIn(PortSpec):
-    """Dynamic (variable-count) optional input port.
-
-    By default the attribute name becomes the port prefix (e.g. ``items = DynIn()``
-    -> ports ``items1``, ``items2``, ...). Pass *prefix* to override the port prefix
-    independently of the Python attribute name.
-    """
+    """Dynamic (variable-count) optional input port."""
     _is_required = False
     _is_input    = True
 
@@ -207,85 +180,36 @@ class DynIn(PortSpec):
 
 
 class Out(PortSpec):
-    """Output port declaration. The attribute name becomes the output port name."""
+    """Output port declaration."""
     _is_input = False
 
     def __init__(self, type_str: str) -> None:
         self.type_str = type_str
         self._cfg: dict[str, Any] = {}
 
-    def as_tuple(self) -> tuple:
-        return (self.type_str, self._cfg)
-
 
 # ---------------------------------------------------------------------------
-# Typed convenience constructors — Inputs
+# Stored per-port spec used internally after class creation
 # ---------------------------------------------------------------------------
-def string_in(default: str = "", **kw: Any) -> In:
-    return In("STRING", default=default, **kw)
 
-def int_in(default: int = 0, **kw: Any) -> In:
-    return In("INT", default=default, **kw)
-
-def float_in(default: float = 0.0, **kw: Any) -> In:
-    return In("FLOAT", default=default, **kw)
-
-def bool_in(default: bool = False, **kw: Any) -> In:
-    return In("BOOL", default=default, **kw)
-
-def file_in(filter: list[str] | None = None, **kw: Any) -> In:
-    return In("FILE", allow_connection=False, enum_filter=filter, **kw)
-
-def enum_in(options: list[str], default: str | None = None, **kw: Any) -> In:
-    return In("ENUM", default=default or (options[0] if options else None),
-              enum_options=options, **kw)
-
-def any_in(**kw: Any) -> OptIn:
-    return OptIn("*", **kw)
-
-def dyn_in(type_str: str = "*", **kw: Any) -> DynIn:
-    return DynIn(type_str, **kw)
-
-def opt_string_in(default: str = "", **kw: Any) -> OptIn:
-    return OptIn("STRING", default=default, **kw)
-
-def opt_int_in(default: int = 0, **kw: Any) -> OptIn:
-    return OptIn("INT", default=default, **kw)
-
-def opt_float_in(default: float = 0.0, **kw: Any) -> OptIn:
-    return OptIn("FLOAT", default=default, **kw)
-
-def opt_bool_in(default: bool = False, **kw: Any) -> OptIn:
-    return OptIn("BOOL", default=default, **kw)
-
-
-# ---------------------------------------------------------------------------
-# Typed convenience constructors — Outputs
-# ---------------------------------------------------------------------------
-def string_out()  -> Out: return Out("STRING")
-def int_out()     -> Out: return Out("INT")
-def float_out()   -> Out: return Out("FLOAT")
-def bool_out()    -> Out: return Out("BOOL")
-def array_out()   -> Out: return Out("ARRAY")
-def dict_out()    -> Out: return Out("DICT")
-def file_out()    -> Out: return Out("FILE")
-def any_out()     -> Out: return Out("*")
-def command_out() -> Out: return Out("COMMAND")
-def signal_out()  -> Out: return Out("SIGNAL")
+@dataclass
+class _PortEntry:
+    name:       str
+    type_str:   str
+    cfg:        dict
+    required:   bool
+    is_input:   bool
+    is_dynamic: bool = False
+    dyn_prefix: str | None = None
 
 
 def _collect_port_specs(cls: type) -> None:
-    """Scan *cls* for In/OptIn/DynIn/Out declarations and auto-generate
-    INPUT_TYPES / RETURN_TYPES / RETURN_NAMES if not already defined.
+    """Scan *cls* for PortSpec declarations and store parsed entries on the class.
 
-    Markers are removed from the class dict after collection so they don't
-    shadow instance attributes.
+    Markers are removed from the class dict after collection.
     """
-    required:  dict[str, tuple] = {}
-    optional:  dict[str, tuple] = {}
-    out_types: list[str]        = []
-    out_names: list[str]        = []
-    to_remove: list[str]        = []
+    entries: list[_PortEntry] = []
+    to_remove: list[str] = []
 
     for attr, val in list(cls.__dict__.items()):
         if not isinstance(val, PortSpec):
@@ -293,19 +217,22 @@ def _collect_port_specs(cls: type) -> None:
         to_remove.append(attr)
 
         if isinstance(val, Out):
-            out_types.append(val.type_str)
-            out_names.append(attr)
+            entries.append(_PortEntry(
+                name=attr, type_str=val.type_str, cfg=val._cfg,
+                required=False, is_input=False,
+            ))
         elif isinstance(val, DynIn):
-            prefix   = val._prefix if val._prefix else attr
-            dyn_name = f"{prefix}{{n}}"
-            optional[dyn_name] = val.as_tuple()
-        elif isinstance(val, OptIn):
-            optional[attr] = val.as_tuple()
-        else:  # In
-            if val._is_required:
-                required[attr] = val.as_tuple()
-            else:
-                optional[attr] = val.as_tuple()
+            prefix = val._prefix if val._prefix else attr
+            entries.append(_PortEntry(
+                name=attr, type_str=val.type_str, cfg=val._cfg,
+                required=False, is_input=True,
+                is_dynamic=True, dyn_prefix=prefix,
+            ))
+        else:
+            entries.append(_PortEntry(
+                name=attr, type_str=val.type_str, cfg=val._cfg,
+                required=val._is_required, is_input=True,
+            ))
 
     for name in to_remove:
         try:
@@ -313,19 +240,13 @@ def _collect_port_specs(cls: type) -> None:
         except AttributeError:
             pass
 
-    if required or optional:
-        _req, _opt = dict(required), dict(optional)
-        @classmethod  # type: ignore[misc]
-        def INPUT_TYPES(_cls: type) -> dict:
-            d: dict = {}
-            if _req: d["required"] = _req
-            if _opt: d["optional"] = _opt
-            return d
-        cls.INPUT_TYPES = INPUT_TYPES  # type: ignore[attr-defined]
+    # Merge with parent entries (parent entries first, child entries override by name)
+    parent_entries: list[_PortEntry] = getattr(cls, '_port_entries', [])
+    merged: dict[str, _PortEntry] = {e.name: e for e in parent_entries}
+    for e in entries:
+        merged[e.name] = e
 
-    if out_types:
-        cls.RETURN_TYPES = tuple(out_types)  # type: ignore[attr-defined]
-        cls.RETURN_NAMES = tuple(out_names)  # type: ignore[attr-defined]
+    cls._port_entries = list(merged.values())
 
 
 class BaseNode:
@@ -336,14 +257,12 @@ class BaseNode:
     body_color: str | None = None
     locked_title: bool = False
     allow_folding: bool = True
-    
     default_width: int | None = None
 
     dynamic_input_prefix: str | None = None
     dynamic_output_prefix: str | None = None
-    
-    RETURN_TYPES: tuple = ()
-    RETURN_NAMES: tuple | None = None
+
+    _port_entries: list[_PortEntry] = []
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -353,6 +272,7 @@ class BaseNode:
             if name.endswith("Node"):
                 name = name[:-4]
             cls.title = name.lower()
+
         _collect_port_specs(cls)
 
     def __init__(self) -> None:
@@ -366,13 +286,12 @@ class BaseNode:
         self.custom_name: str | None = None
         self.inputs: dict[str, Port] = {}
         self.outputs: dict[str, Port] = {}
-        
+
         self.last_execution_time: float | None = None
-        # GUI self-registration system
         self._gui_builders: dict[str, callable] = {}
         self._gui_builders_registered = False
 
-        self._build_ports_from_schema()
+        self._build_ports()
         self._register_gui_builders()
 
         self.error_msg: str | None = None
@@ -381,119 +300,92 @@ class BaseNode:
 
     @property
     def display_name(self) -> str:
-        """Get the display name for this node - uses custom name if set, otherwise title or class name."""
-        # Use custom name if set and not empty
         if self.custom_name and self.custom_name.strip():
             return self.custom_name.strip()
-        # Use title if set and not empty
         if self.title and self.title.strip():
             return self.title.strip()
-        # Fall back to class name (without "Node" suffix)
         name = self.__class__.__name__
         if name.endswith("Node"):
             name = name[:-4]
         return name.lower()
 
-    @classmethod
-    def INPUT_TYPES(cls) -> dict:
-        return {}
+    def _build_ports(self) -> None:
+        for entry in self.__class__._port_entries:
+            if entry.is_input:
+                self._add_input_from_entry(entry)
+            else:
+                self._add_output_from_entry(entry)
 
-    def _build_ports_from_schema(self) -> None:
-        schema = self.INPUT_TYPES()
-        
-        for name, spec in schema.get("required", {}).items():
-            self._add_port_from_spec(name, spec, required=True)
-        
-        for name, spec in schema.get("optional", {}).items():
-            self._add_port_from_spec(name, spec, required=False)
-        
-        self._build_outputs()
+    def _add_input_from_entry(self, entry: _PortEntry) -> Port:
+        port_type = parse_type(entry.type_str)
+        cfg = entry.cfg
 
-    def _add_port_from_spec(self, name: str, spec: Any, required: bool = False) -> Port:
-        port_type = parse_type(spec)
-        config = get_type_config(spec)
+        default          = cfg.get("default")
+        editable         = cfg.get("editable", True)
+        display_in_insp  = cfg.get("display_in_inspector", True)
+        enum_options     = cfg.get("enum_options")
+        enum_filter      = cfg.get("enum_filter")
+        graph_enum       = cfg.get("graph_enum")
+        label            = cfg.get("label", "")
+        allow_connection = cfg.get("allow_connection", True)
+        full_row         = cfg.get("full_row", False)
+        below_ports      = cfg.get("below_ports", False)
+        row_height       = cfg.get("row_height")
+        row_stretch      = cfg.get("row_stretch", False)
+        number_increment = cfg.get("step")
 
-        default = config.get("default")
-        editable = config.get("editable", True)
-        display_in_inspector = config.get("display_in_inspector", True)
-        enum_options = config.get("enum_options")
-        enum_filter = config.get("enum_filter")
-        graph_enum = config.get("graph_enum")
-        label = config.get("label", "")
-        is_dynamic = config.get("dynamic", False)
-        allow_connection = config.get("allow_connection", True)
-        full_row = config.get("full_row", False)
-        below_ports = config.get("below_ports", False)
-        row_height = config.get("row_height")
-        row_stretch = config.get("row_stretch", False)
-        number_increment = config.get("step")
-        
-        # Set default for boolean ports
         if port_type == PortType.BOOL and default is None:
             default = False
-        
-        # Handle dynamic input ports with {n} pattern
-        if is_dynamic or (isinstance(name, str) and "{n}" in name):
-            base_name = name.replace("{n}", "")
-            name = f"{base_name}1"
-            is_dynamic = True
-            self.dynamic_input_prefix = base_name
-        
+
+        name = entry.name
+        if entry.is_dynamic:
+            prefix = entry.dyn_prefix or entry.name
+            name = f"{prefix}1"
+            self.dynamic_input_prefix = prefix
+
         p = Port(
             name=name,
             is_input=True,
             port_type=port_type,
             node_id=self.id,
-            value=default
+            value=default,
         )
-        p.editable = editable
-        p.display_in_inspector = display_in_inspector
-        p.required = required
-        p.label = label
-        p.is_dynamic = is_dynamic
-        p.allow_connection = allow_connection
-        p.full_row = full_row
-        p.below_ports = below_ports
-        p.row_height = row_height
-        p.row_stretch = row_stretch
-        p.number_increment = number_increment
-        
-        # Set enum options if provided
+        p.editable             = editable
+        p.display_in_inspector = display_in_insp
+        p.required             = entry.required
+        p.label                = label
+        p.is_dynamic           = entry.is_dynamic
+        p.allow_connection     = allow_connection
+        p.full_row             = full_row
+        p.below_ports          = below_ports
+        p.row_height           = row_height
+        p.row_stretch          = row_stretch
+        p.number_increment     = number_increment
+
         if enum_options is not None:
             p.enum_options = [str(opt) for opt in enum_options]
         if enum_filter is not None:
             p.enum_filter = enum_filter
         if graph_enum is not None:
             p.graph_enum = graph_enum
-        
-        # Set boolean enum options for UI compatibility
+
         if port_type == PortType.BOOL and enum_options is None:
             p.enum_options = ["True", "False"]
             if isinstance(default, bool):
                 p.value = "True" if default else "False"
-        
+
         self.inputs[name] = p
         return p
 
-    def _build_outputs(self) -> None:
-        types = self.RETURN_TYPES
-        names = self.RETURN_NAMES
-        
-        for i, type_spec in enumerate(types):
-            port_type = parse_type(type_spec)
-            
-            if names and i < len(names):
-                name = names[i]
-            else:
-                name = f"output_{i}"
-            
-            p = Port(
-                name=name,
-                is_input=False,
-                port_type=port_type,
-                node_id=self.id
-            )
-            self.outputs[name] = p
+    def _add_output_from_entry(self, entry: _PortEntry) -> Port:
+        p = Port(
+            name=entry.name,
+            is_input=False,
+            port_type=parse_type(entry.type_str),
+            node_id=self.id,
+        )
+        self.outputs[entry.name] = p
+        return p
 
     def validate(self) -> str | None:
         self.error_msg = None
@@ -502,10 +394,11 @@ class BaseNode:
 
         missing = []
         for pname, port in self.inputs.items():
-            if port.required and not self.graph.get_input_connection(self.id, pname):
-                val = port.value
-                if val is None or (isinstance(val, str) and not val.strip()):
-                    missing.append(port.label or pname)
+            if port.required:
+                if not self.graph.get_input_connection(self.id, pname):
+                    val = port.value
+                    if val is None or (isinstance(val, str) and not val.strip()):
+                        missing.append(port.label or pname)
 
         if missing:
             self.error_msg = f"Required inputs missing: {', '.join(missing)}"
@@ -580,10 +473,6 @@ class BaseNode:
         raise RuntimeError(msg)
 
     def collect_dynamic(self, prefix: str, kwargs: dict) -> list:
-        """Return values for dynamic ports named '{prefix}1', '{prefix}2', ... sorted by number.
-
-        Filters out None values (unconnected trailing ports).
-        """
         n = len(prefix)
         pairs = [
             (int(k[n:]), v)
@@ -595,20 +484,15 @@ class BaseNode:
     def resolve_path(self, path: str) -> str:
         if not path:
             return ""
-
         norm_path = os.path.normpath(str(path)).replace("\\", "/")
-
         base_dir = self._graph_base_dir()
         if base_dir:
             if os.path.isabs(norm_path):
                 return norm_path
             return os.path.normpath(os.path.join(base_dir, norm_path)).replace("\\", "/")
-
-        # Fallback: return as-is
         return norm_path
 
     def _graph_base_dir(self) -> str | None:
-        """Returns the best available base directory for resolving/relativizing paths."""
         if not self.graph:
             return None
         if self.graph.file_path:
@@ -616,23 +500,22 @@ class BaseNode:
         return getattr(self.graph, "output_dir", None) or getattr(self.graph, "project_dir", None)
 
     def _try_make_relative(self, abs_path: str, base_dir: str) -> str:
-        """Return a relative path if abs_path is on the same drive as base_dir, else abs_path."""
         try:
             rel = os.path.relpath(abs_path, base_dir).replace("\\", "/")
-            # Reject only if relpath couldn't find a common root (different Windows drives).
-            # Leading '..' traversal is fine — it's valid relative syntax on all platforms.
             if not os.path.isabs(rel):
                 return rel
         except ValueError:
-            pass  # Different drives on Windows — keep absolute
+            pass
         return abs_path.replace("\\", "/")
 
-    def validate_file_input(self, path: str, must_exist: bool = True) -> str:
+    def validate_file_input(self, path: str, must_exist: bool = True, absolute_path: bool = False) -> str:
         resolved = self.resolve_path(path)
         if not resolved:
             self.fail("File path is empty.")
         if must_exist and not os.path.exists(resolved):
             self.fail(f"File not found: {resolved}")
+        if absolute_path:
+            return resolved
         base_dir = self._graph_base_dir()
         if base_dir:
             return self._try_make_relative(resolved, base_dir)
@@ -650,13 +533,11 @@ class BaseNode:
         return default
 
     def sync_dynamic_ports(self) -> bool:
-        """Ensure one empty dynamic port at the end and auto-renumber when ports are removed."""
         if not self.graph:
             return False
 
         changed = False
 
-        # Group dynamic ports by prefix and direction
         groups: dict[tuple[str, bool], PortType] = {}
         for p in self.inputs.values():
             if p.is_dynamic:
@@ -666,26 +547,21 @@ class BaseNode:
                 groups[(p.name.rstrip("0123456789"), False)] = p.port_type
 
         for (prefix, is_input), ptype in groups.items():
-            # Collect all connected ports and their original indices
             connected_ports = {}
             for c in self.graph.connections:
                 if is_input:
                     if c.dst_node == self.id and c.dst_port.startswith(prefix):
                         suffix = c.dst_port[len(prefix):]
                         if suffix.isdigit():
-                            idx = int(suffix)
-                            connected_ports[idx] = c.dst_port
+                            connected_ports[int(suffix)] = c.dst_port
                 else:
                     if c.src_node == self.id and c.src_port.startswith(prefix):
                         suffix = c.src_port[len(prefix):]
                         if suffix.isdigit():
-                            idx = int(suffix)
-                            connected_ports[idx] = c.src_port
+                            connected_ports[int(suffix)] = c.src_port
 
-            # Sort connected ports by their original indices
             sorted_indices = sorted(connected_ports.keys())
 
-            # Renumber ports to be consecutive (1, 2, 3, ...)
             renumber_map = {}
             new_idx = 1
             for old_idx in sorted_indices:
@@ -694,7 +570,6 @@ class BaseNode:
                     changed = True
                 new_idx += 1
 
-            # Apply renumbering to connections if needed
             if renumber_map:
                 new_connections = []
                 for c in self.graph.connections:
@@ -721,10 +596,8 @@ class BaseNode:
                                     )
                                     continue
                     new_connections.append(c)
-
                 self.graph.connections = new_connections
 
-            # Calculate maximum connected port index
             max_conn_idx = 0
             for c in self.graph.connections:
                 if is_input:
@@ -738,14 +611,13 @@ class BaseNode:
                         if suffix.isdigit():
                             max_conn_idx = max(max_conn_idx, int(suffix))
 
-            # Ensure ports exist up to target count (at least one empty port)
-            # Calculate target based on connected ports + minimum empty ports
-            min_empty_ports = 1
-            target_count = max(min_empty_ports, max_conn_idx + 1)
+            target_count = max(1, max_conn_idx + 1)
             port_dict = self.inputs if is_input else self.outputs
 
-            # Get the template port to copy settings from
-            template_port = next((p for p in port_dict.values() if p.is_dynamic and p.name.startswith(prefix)), None)
+            template_port = next(
+                (p for p in port_dict.values() if p.is_dynamic and p.name.startswith(prefix)),
+                None,
+            )
 
             for i in range(1, target_count + 1):
                 name = f"{prefix}{i}"
@@ -753,7 +625,6 @@ class BaseNode:
                     p = Port(name=name, is_input=is_input, port_type=ptype, node_id=self.id)
                     p.is_dynamic = True
                     p.allow_connection = True
-                    # Copy relevant settings from template port if available
                     if template_port:
                         p.editable             = template_port.editable
                         p.display_in_inspector = template_port.display_in_inspector
@@ -762,16 +633,12 @@ class BaseNode:
                     port_dict[name] = p
                     changed = True
 
-            # Remove unused ports beyond target count
-            ports_to_remove = []
-            for name in port_dict.keys():
-                if name.startswith(prefix):
-                    suffix = name[len(prefix):]
-                    if suffix.isdigit():
-                        idx = int(suffix)
-                        if idx > target_count:
-                            ports_to_remove.append(name)
-            
+            ports_to_remove = [
+                name for name in port_dict
+                if name.startswith(prefix)
+                and name[len(prefix):].isdigit()
+                and int(name[len(prefix):]) > target_count
+            ]
             for name in ports_to_remove:
                 del port_dict[name]
                 changed = True
@@ -780,7 +647,7 @@ class BaseNode:
 
     def get_reads(self) -> set[str]:
         return set()
-    
+
     def get_writes(self) -> set[str]:
         p = self.inputs.get("var_name")
         if p and p.value and "value" in self.inputs:
@@ -791,14 +658,10 @@ class BaseNode:
         values = {}
         for k, v in self.inputs.items():
             val = copy.deepcopy(v.value)
-            # Store file paths relative to the graph file's directory if possible
             if v.port_type == PortType.FILE and val and self.graph and self.graph.file_path:
                 try:
-                    # Get the resolved absolute path of the file
                     abs_val = os.path.abspath(self.resolve_path(val))
                     base_dir = self.graph.file_path.parent
-                    
-                    # Compute relative path
                     val = self._try_make_relative(str(abs_val), str(base_dir))
                 except (ValueError, TypeError):
                     pass
@@ -831,73 +694,63 @@ class BaseNode:
         node.title = cls.title
         node.custom_name = data.get("custom_name")
 
-        # Restore dynamic ports that may not exist in the base class
-        # This isn't efficient at all but too bad
         values = data.get("values", {})
+
+        # Restore dynamic ports that were saved but don't yet exist on the node
         for name in list(values.keys()):
             if name not in node.inputs:
-                # Check if this matches a dynamic pattern
                 for port in node.inputs.values():
-                    if port.is_dynamic:
-                        prefix = port.name.rstrip("0123456789")
-                        if name.startswith(prefix) and name[len(prefix):].isdigit():
-                            # Create the missing dynamic port, copying all flags from the template
-                            p = Port(name=name, is_input=True, port_type=port.port_type, node_id=node.id)
-                            p.is_dynamic           = True
-                            p.editable             = port.editable
-                            p.display_in_inspector = port.display_in_inspector
-                            p.allow_connection     = port.allow_connection
-                            p.full_row             = port.full_row
-                            p.below_ports          = port.below_ports
-                            p.label                = port.label
-                            p.row_height           = port.row_height
-                            p.row_stretch          = port.row_stretch
-                            p.enum_options         = port.enum_options
-                            p.enum_filter          = port.enum_filter
-                            p.graph_enum           = port.graph_enum
-                            node.inputs[name] = p
-                            break
+                    if not port.is_dynamic:
+                        continue
+                    prefix = port.name.rstrip("0123456789")
+                    if name.startswith(prefix) and name[len(prefix):].isdigit():
+                        p = Port(name=name, is_input=True, port_type=port.port_type, node_id=node.id)
+                        p.is_dynamic           = True
+                        p.editable             = port.editable
+                        p.display_in_inspector = port.display_in_inspector
+                        p.allow_connection     = port.allow_connection
+                        p.full_row             = port.full_row
+                        p.below_ports          = port.below_ports
+                        p.label                = port.label
+                        p.row_height           = port.row_height
+                        p.row_stretch          = port.row_stretch
+                        p.enum_options         = port.enum_options
+                        p.enum_filter          = port.enum_filter
+                        p.graph_enum           = port.graph_enum
+                        node.inputs[name] = p
+                        break
 
-        # Restore input values with boolean normalization for UI compatibility
         for name, val in values.items():
             if name in node.inputs:
                 port = node.inputs[name]
                 if port.port_type == PortType.BOOL and isinstance(val, bool):
                     val = "True" if val else "False"
                 port.value = val
-        
-        # Update node IDs for all ports
+
         for p in (*node.inputs.values(), *node.outputs.values()):
             p.node_id = node.id
 
-        node._gui_builders_registered = False  # Reset flag to force re-registration. This is dumb.
+        node._gui_builders_registered = False
         node._register_gui_builders()
-        
-        # Call on_property_changed after all ports and values are set
+
         if hasattr(node, 'on_property_changed'):
             node.on_property_changed()
         return node
 
     # GUI Self-Registration System
     def _register_gui_builders(self) -> None:
-        """Register GUI builders for this node. Override in subclasses."""
         self._gui_builders_registered = True
-    
+
     def register_gui_builder(self, port_name: str, builder_func: callable) -> None:
         self._gui_builders[port_name] = builder_func
-    
+
     def get_gui_builder(self, port_name: str) -> callable | None:
         return self._gui_builders.get(port_name)
-    
+
     def has_gui_builder(self, port_name: str) -> bool:
         return port_name in self._gui_builders
-    
-    def create_widget_for_port(self, port):
-        """Return a QWidget for this port, or None to use the default widget.
 
-        Override in subclasses for fully custom widgets, or use
-        register_gui_builder() to register per-port builder functions.
-        """
+    def create_widget_for_port(self, port):
         builder = self.get_gui_builder(port.name)
         if builder:
             return builder(port)

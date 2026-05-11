@@ -1,5 +1,5 @@
 from __future__ import annotations
-from core.node import BaseNode, string_in, int_in, file_in, DynIn, Out
+from core.node import BaseNode, In, DynIn, Out
 from nodes.qc.shared_categories import RENDERMESH_PARAMETER_CATEGORY, QC_CATEGORY
 
 
@@ -9,14 +9,13 @@ class BodyNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    name = string_in(default="studio")
-    mesh_file = file_in()
+    name = In("STRING", default="studio")
+    mesh_file = In("FILE")
 
     command = Out("QC_COMMAND")
 
-    def execute(self, name: str, mesh_file: str, _preview: bool = False, **kwargs):
-        mesh = self.validate_file_input(mesh_file, must_exist=not _preview)
-        return (f'$body "{name}" "{mesh}"',)
+    def execute(self, name: str, mesh_file: str, **kwargs):
+        return (f'$body "{name}" "{mesh_file}"',)
 
 
 class BodygroupNode(BaseNode):
@@ -25,7 +24,7 @@ class BodygroupNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    name = string_in(default="bodygroup")
+    name = In("STRING", default="bodygroup")
     item = DynIn(prefix="item", editable=False)
 
     command = Out("QC_COMMAND")
@@ -46,13 +45,12 @@ class StudioNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    mesh_file = file_in()
+    mesh_file = In("FILE", enum_filter=[".dmx", ".smd"], editable=False)
 
     command = Out("QC_COMMAND")
 
     def execute(self, mesh_file: str, **kwargs):
-        path = self.validate_file_input(mesh_file, must_exist=False)
-        return (f'studio "{path}"',)
+        return (f'studio "{mesh_file}"',)
 
 
 class BlankNode(BaseNode):
@@ -73,7 +71,7 @@ class LODNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    threshold = int_in(default=10)
+    threshold = In("INT", default=10)
     item = DynIn(prefix="item")
 
     command = Out("QC_COMMAND")
@@ -93,15 +91,13 @@ class ReplaceModelNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    source_mesh = file_in()
-    target_mesh = file_in()
+    source_mesh = In("ANY")
+    target_mesh = In("ANY")
 
     command = Out("QC_COMMAND")
 
     def execute(self, source_mesh: str, target_mesh: str, **kwargs):
-        src = self.validate_file_input(source_mesh, must_exist=False)
-        tgt = self.validate_file_input(target_mesh, must_exist=False)
-        return (f'replacemodel "{src}" "{tgt}"',)
+        return (f'replacemodel "{source_mesh}" "{target_mesh}"',)
 
 
 class ReplaceBoneNode(BaseNode):
@@ -110,8 +106,8 @@ class ReplaceBoneNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    source_bone = string_in(default="bone_src")
-    target_bone = string_in(default="bone_tgt")
+    source_bone = In("STRING", default="bone_src")
+    target_bone = In("STRING", default="bone_tgt")
 
     command = Out("QC_COMMAND")
 
@@ -125,10 +121,9 @@ class RemoveMeshNode(BaseNode):
     CATEGORY = RENDERMESH_PARAMETER_CATEGORY
     color = "#2a5a3a"
 
-    mesh_file = file_in()
+    mesh_file = In("FILE")
 
     command = Out("QC_COMMAND")
 
     def execute(self, mesh_file: str, **kwargs):
-        path = self.validate_file_input(mesh_file, must_exist=False)
-        return (f'removemesh "{path}"',)
+        return (f'removemesh "{mesh_file}"',)

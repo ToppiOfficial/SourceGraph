@@ -3,19 +3,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget,
                                QTreeWidgetItem, QPushButton, QFileDialog, QLabel, QHeaderView)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from gui.theme import (
-    BTN_STYLE, TREE_STYLE, BG_MED, BG_DARK, FG_DIM, FG_MAIN, BORDER_DARK,
-    COLOR_VALID, COLOR_INVALID, load_file_icon,
-)
-
-_DIALOG_STYLE = f"""
-QDialog {{
-    background: {BG_MED};
-    color: {FG_MAIN};
-    border: 1px solid {BORDER_DARK};
-}}
-QLabel {{ color: {FG_DIM}; font-size: 12px; }}
-"""
+from gui.theme import *
 
 
 class AssetFinderDialog(QDialog):
@@ -30,7 +18,7 @@ class AssetFinderDialog(QDialog):
         self._refresh_list()
 
     def _setup_ui(self):
-        self.setStyleSheet(_DIALOG_STYLE)
+        self.setStyleSheet(DIALOG_STYLE)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)

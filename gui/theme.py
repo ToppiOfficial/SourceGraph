@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 import os
-
 from PySide6.QtGui import QIcon
 from gui.widgets.icon_provider import load_icon
-BG_DARK             = "#1a1a1a"
+
+BG_DARK             = "#1F1F1F"
 BG_DARKER           = "#111111"
 BG_MED              = "#252525"
 BG_BASE             = "#2a2a2a"
@@ -25,6 +24,8 @@ FG_DEFAULT          = "#cccccc"
 FG_DIM              = "#888888"
 FG_DIMMER           = "#555555"
 
+NODE_INPUT_BG       = "#131313"
+
 ACCENT              = "#63c2df"
 
 # -- Semantic & Functional Colors ---------------------------------------------
@@ -35,17 +36,34 @@ VAR_STR             = "#9C27B0"
 
 COLOR_VALID         = "#6a9955"
 COLOR_INVALID       = "#f44747"
-COLOR_ERROR         = "#f44747"
+#COLOR_ERROR         = "#f44747"
+COLOR_ERROR         = COLOR_INVALID
 COLOR_PREVIEW       = "#569cd6"
 COLOR_COMPILE       = "#ce9178"
 COLOR_WARN          = "#ce9178"
 COLOR_INFO          = "#888888"
 
+# -- Reusable Style Fragments --------------------------------------------------
+COMMON_BORDER_STYLE = f"border: 1px solid {BORDER_DARK}; border-radius: 4px;"
+LIST_WIDGET_BASE = f"""
+    background: {BG_DARK};
+    {COMMON_BORDER_STYLE}
+    outline: none;
+"""
+INPUT_STYLE = f"""
+    background: {BG_DARK};
+    color: {FG_BRIGHT};
+    border: 1px solid {BORDER_LIGHT};
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 11px;
+"""
+
 # -- Node Editor --------------------------------------------------------------
 NODE_BG             = "#202020"
 HEADER_DARKNESS     = 150
-WIRE_IDLE           = "#BEBEBE"
-WIRE_SEL            = "#f29d29"
+WIRE_IDLE           = "#9E9E9E"
+WIRE_SEL            = "#ffffff"
 
 GRID_COARSE         = "#555555"
 GRID_FINE           = "#404040"
@@ -65,20 +83,20 @@ MAIN_STYLESHEET = f"""
 QMainWindow, QWidget            {{ background-color: {BG_BASE}; color: {FG_MAIN}; font-family: {FONT_UI}; }}
 QDockWidget                     {{ font-weight: bold; color: {FG_DIM}; }}
 QDockWidget::title              {{ background: {BG_DARK}; padding-left: 5px; padding-top: 4px; border: 1px solid {BORDER_DARK}; }}
-QTreeWidget, QListView          {{ background-color: {BG_DARK}; alternate-background-color: {BG_MED}; border: 1px inset {BORDER_DARK}; color: {FG_DEFAULT}; outline: none; }}
+QTreeWidget, QListView          {{ {LIST_WIDGET_BASE} alternate-background-color: {BG_MED}; color: {FG_DEFAULT}; }}
 QTreeWidget::item               {{ padding: 4px; }}
 QTreeWidget::item:selected,
 QListView::item:selected        {{ background-color: {BG_SELECTED}; color: {ACCENT}; }}
 QHeaderView::section            {{ background-color: {BG_DARK}; color: {FG_DIM}; padding: 4px; border: none; border-right: 1px solid {BORDER_DARK}; border-bottom: 1px solid {BORDER_DARK}; font-size: {FONT_SM}; font-weight: bold; }}
-QPushButton, QToolButton        {{ background-color: {BG_SURFACE}; color: {FG_BRIGHT}; border: 1px solid {BORDER_DARK}; border-radius: 2px; padding: 4px 10px; }}
+QPushButton, QToolButton        {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {BG_SURFACE}, stop:1 {BG_HOVER}); border-radius: 2px; padding: 4px 8px; }}
 QPushButton:hover,
 QToolButton:hover               {{ background-color: {BG_HOVER}; }}
 QPushButton:pressed,
 QToolButton:pressed             {{ background-color: {BG_RAISED}; }}
 QTextEdit                       {{ background-color: {BG_DARKER}; border: 1px inset {BORDER_DARK}; color: {FG_BRIGHT}; font-family: {FONT_MONO}; font-size: {FONT_SM}; }}
 QTabWidget::pane                {{ border: 1px solid {BORDER_DARK}; background: {BG_BASE}; }}
-QTabBar::tab                    {{ background: {BG_DARK}; color: {FG_DIM}; padding: 6px 12px; border: 1px solid {BORDER_DARK}; border-bottom: none; margin-right: 2px; }}
-QTabBar::tab:selected           {{ background: {BG_BASE}; color: {ACCENT}; font-weight: bold; }}
+QTabBar::tab                    {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {BG_SURFACE}, stop:1 {BG_HOVER}); color: {FG_DIM}; padding: 6px 12px; border: 1px solid {BORDER_DARK}; border-bottom: none; margin-right: 2px; }}
+QTabBar::tab:selected           {{ background: {BG_BASE}; color: {FG_BRIGHT}; }}
 QMenu                           {{ background: {BG_DARK}; border: 1px solid {BORDER_DARK}; }}
 QMenu::item:selected            {{ background: {BG_SELECTED}; }}
 QToolBar                        {{ background: {BG_DARK}; border-bottom: 1px solid {BORDER_DARK}; }}
@@ -102,6 +120,17 @@ QLineEdit {{
     font-size: 11px;
 }}
 QLineEdit:focus {{ border: 1px solid {ACCENT}; }}
+"""
+
+NODE_TEXT_DISPLAY_STYLE = f"""
+    QTextEdit {{
+        background-color: {NODE_INPUT_BG};
+        color: #f0f0f0;
+        border: none;
+        padding: 4px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 10px;
+    }}
 """
 
 NODE_COMBO_STYLE = f"""
@@ -151,11 +180,21 @@ QComboBox QAbstractItemView::separator {{
 
 BTN_STYLE = f"""
 QPushButton {{
-    background: {BG_SURFACE}; color: {FG_MAIN};
-    border: 1px solid {BORDER_DARK}; border-radius: 2px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 {BG_SURFACE}, stop:1 {BG_HOVER});
+    color: {FG_MAIN};
+    border: none; border-radius: 2px;
     padding: 1px 1px; font-family: {FONT_UI}; font-size: {FONT_MD};
 }}
 QPushButton:hover {{ background: {BG_HOVER}; }}
+"""
+
+NUMBER_INPUT_STYLE = f"""
+    #NumberInputContainer {{
+        background-color: {NODE_INPUT_BG};
+        border: none;
+        border-radius: 3px;
+    }}
 """
 
 TOOLBAR = f"""
@@ -185,24 +224,16 @@ SEARCH_BAR_STYLE = f"""
 QLineEdit {{
     background: {BG_DARK};
     color: {FG_BRIGHT};
-    border: 1px solid {BORDER_LIGHT};
-    border-radius: 6px;
+    border: none;
     padding: 10px 12px;
     font-size: 13px;
     font-family: {FONT_UI};
-}}
-QLineEdit:focus {{
-    border: 2px solid {ACCENT};
-    background: {BG_DARKER};
 }}
 """
 
 CATEGORY_LIST_STYLE = f"""
 QListWidget {{
-    background: {BG_DARK};
-    border: 1px solid {BORDER_MED};
-    border-radius: 6px;
-    outline: none;
+    {LIST_WIDGET_BASE}
     font-size: 12px;
     font-family: {FONT_UI};
 }}
@@ -225,10 +256,7 @@ QListWidget::item:hover {{
 
 NODE_LIST_STYLE = f"""
 QListWidget {{
-    background: {BG_DARK};
-    border: 1px solid {BORDER_MED};
-    border-radius: 6px;
-    outline: none;
+    {LIST_WIDGET_BASE}
     font-size: 11px;
     font-family: {FONT_UI};
 }}
@@ -320,26 +348,32 @@ QHeaderView::section {{
 }}
 """
 
+DIALOG_STYLE = f"""
+QDialog {{
+    background: {BG_MED};
+    color: {FG_MAIN};
+    border: 1px solid {BORDER_DARK};
+}}
+QLabel {{ color: {FG_DIM}; font-size: 12px; }}
+"""
+
 # -- Node Widget Styles ---------------------------------------------------------
 NODE_WIDGET_STYLE = f"""
 QLineEdit {{
-    background-color: {BG_DARK};
+    background-color: {NODE_INPUT_BG};
     color: {FG_BRIGHT};
-    border: 1px solid {BORDER_LIGHT};
+    border: none;
     border-radius: 3px;
     padding: 2px 4px;
     font-size: 11px;
-}}
-QLineEdit:focus {{
-    border: 1px solid {ACCENT};
 }}
 """
 
 NODE_BOOL_STYLE = f"""
 QPushButton {{
-    background-color: {BG_DARK};
+    background-color: {NODE_INPUT_BG};
     color: {FG_BRIGHT};
-    border: 1px solid {BORDER_LIGHT};
+    border: none;
     border-radius: 3px;
     font-size: 11px;
     font-weight: bold;
@@ -347,7 +381,6 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background-color: {BG_HOVER};
-    border-color: {ACCENT};
 }}
 """
 
@@ -361,19 +394,16 @@ QPushButton {{
     padding: 0px;
     min-width: 16px;
 }}
-QPushButton:hover {{
-    color: {FG_BRIGHT};
-}}
 QPushButton:pressed {{
-    color: {ACCENT};
+    color: {FG_BRIGHT};
 }}
 """
 
 NODE_ENUM_BTN_STYLE = f"""
 QPushButton {{
-    background-color: {BG_DARK};
+    background-color: {NODE_INPUT_BG};
     color: {FG_BRIGHT};
-    border: 1px solid {BORDER_LIGHT};
+    border: none;
     border-radius: 3px;
     padding: 2px 8px;
     font-size: 11px;
@@ -381,14 +411,13 @@ QPushButton {{
 }}
 QPushButton:hover {{
     background-color: {BG_HOVER};
-    border-color: {ACCENT};
 }}
 """
 
 NODE_FILE_LABEL_STYLE = f"""
     QLabel {{
-        background-color: #1e1e1e;
-        border: 1px solid #3a3a3a;
+        background-color: {NODE_INPUT_BG};
+        border: none;
         border-radius: 4px;
         padding: 4px 8px;
         color: {FG_MAIN};
@@ -396,7 +425,97 @@ NODE_FILE_LABEL_STYLE = f"""
     }}
 """
 
-# -- Execution Panel Styles ---------------------------------------------------
+# -- Dialog Styles -------------------------------------------------------------
+DIALOG_RENAME_STYLE = f"""
+    QDialog {{
+        background: {BG_DARK};
+        color: {FG_MAIN};
+    }}
+    QLabel {{
+        color: {FG_MAIN};
+        font-size: 12px;
+    }}
+    QLineEdit {{
+        {INPUT_STYLE}
+        background: {BG_SURFACE};
+        padding: 6px;
+    }}
+    QLineEdit:focus {{
+        border: 1px solid {ACCENT};
+    }}
+    QDialogButtonBox QPushButton {{
+        background: {BG_SURFACE};
+        border: 1px solid {BORDER_LIGHT};
+        border-radius: 3px;
+        color: {FG_MAIN};
+        padding: 6px 12px;
+        font-size: 12px;
+    }}
+    QDialogButtonBox QPushButton:hover {{
+        background: {BG_HOVER};
+        border: 1px solid {ACCENT};
+    }}
+"""
+
+# -- View Control Styles -------------------------------------------------------
+VIEW_CONTROLS_STYLE = f"""
+    QWidget {{
+        background-color: rgba(30, 30, 30, 230);
+        border: 1px solid {BORDER_DARK};
+        border-radius: 8px;
+    }}
+    QPushButton {{
+        background: transparent;
+        color: {FG_MAIN};
+        border: 1px solid transparent;
+        font-weight: bold;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }}
+    QPushButton:hover {{ 
+        background: {BG_HOVER}; 
+        border: 1px solid {BORDER_LIGHT};
+    }}
+    QPushButton:checked {{ 
+        background: {BG_HOVER}; 
+        color: {BG_DARK};
+    }}
+    QPushButton:checked:hover {{ 
+        background: {ACCENT};
+        opacity: 0.8;
+    }}
+"""
+
+# -- Notification Styles -------------------------------------------------------
+NOTIFICATION_STYLE = f"""
+    QLabel {{
+        background-color: {BG_DARKER};
+        color: {FG_MAIN};
+        border: 2px solid {{bg_color}};
+        border-radius: 8px;
+        padding: 9px 20px;
+        font-family: {FONT_MONO};
+        font-size: 12px;
+        font-weight: bold;
+    }}
+"""
+
+# -- Preview Panel Styles ------------------------------------------------------
+PREVIEW_SCROLL_STYLE = f"""
+    QScrollArea {{ background: transparent; border: none; }}
+    QScrollBar:vertical {{ background: transparent; width: 6px; border: none; }}
+    QScrollBar::handle:vertical {{ background: {BG_SURFACE}; border-radius: 3px; min-height: 20px; }}
+    QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
+"""
+
+PREVIEW_RENDER_CONTAINER_STYLE = f"""
+    QFrame {{
+        background-color: {BG_DARK};
+        border: 1px solid {BORDER_DARK};
+        border-radius: 8px;
+    }}
+"""
+
 EXEC_ITEM_CHECKBOX_STYLE = f"""
 QCheckBox {{
     background: transparent;

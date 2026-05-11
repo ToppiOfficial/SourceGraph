@@ -89,12 +89,7 @@ class _AssetSearchBase(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{ background: transparent; border: none; }}
-            QScrollBar:vertical {{ background: transparent; width: 6px; border: none; }}
-            QScrollBar::handle:vertical {{ background: {BG_SURFACE}; border-radius: 3px; min-height: 20px; }}
-            QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
-        """)
+        scroll.setStyleSheet(PREVIEW_SCROLL_STYLE)
         self._pcontent = QWidget()
         self._pcontent.setStyleSheet("background: transparent;")
         self.preview_layout = QVBoxLayout(self._pcontent)
@@ -335,7 +330,7 @@ class FileSearchDialog(_AssetSearchBase):
                     thumb_lbl.setPixmap(thumb)
                     thumb_lbl.setAlignment(Qt.AlignCenter)
                     frame = QFrame()
-                    frame.setStyleSheet(f"QFrame {{ background: {BG_MED}; border: 1px solid {BORDER_DARK}; border-radius: 4px; }}")
+                    frame.setStyleSheet(PREVIEW_RENDER_CONTAINER_STYLE)
                     fbox = QVBoxLayout(frame)
                     fbox.setContentsMargins(4, 4, 4, 4)
                     fbox.addWidget(thumb_lbl)

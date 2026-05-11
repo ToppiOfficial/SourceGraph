@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 from gui.theme import *
 
-
 class RenameDialog(QDialog):
     """Reusable rename dialog with consistent styling."""
     
@@ -26,39 +25,7 @@ class RenameDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background: {BG_DARK};
-                color: {FG_MAIN};
-            }}
-            QLabel {{
-                color: {FG_MAIN};
-                font-size: 12px;
-            }}
-            QLineEdit {{
-                background: {BG_SURFACE};
-                border: 1px solid {BORDER_LIGHT};
-                border-radius: 3px;
-                color: {FG_MAIN};
-                padding: 6px;
-                font-size: 12px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {ACCENT};
-            }}
-            QDialogButtonBox QPushButton {{
-                background: {BG_SURFACE};
-                border: 1px solid {BORDER_LIGHT};
-                border-radius: 3px;
-                color: {FG_MAIN};
-                padding: 6px 12px;
-                font-size: 12px;
-            }}
-            QDialogButtonBox QPushButton:hover {{
-                background: {BG_HOVER};
-                border: 1px solid {ACCENT};
-            }}
-        """)
+        self.setStyleSheet(DIALOG_RENAME_STYLE)
     
     def get_name(self) -> str:
         """Get the entered name, stripped of whitespace."""

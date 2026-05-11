@@ -1,4 +1,4 @@
-from core.node import BaseNode, int_in, Out
+from core.node import BaseNode, In, Out
 from nodes.qc.shared_categories import RENDER_SETTING_CATEGORY
 
 class MaxVerts(BaseNode):
@@ -7,8 +7,8 @@ class MaxVerts(BaseNode):
     CATEGORY = RENDER_SETTING_CATEGORY
     color = "#415a2a"
 
-    limit = int_in(default=65536)
-    clamp = int_in(default=65536)
+    limit = In("INT", default=65536)
+    clamp = In("INT", default=65536)
 
     command = Out("QC_COMMAND")
 

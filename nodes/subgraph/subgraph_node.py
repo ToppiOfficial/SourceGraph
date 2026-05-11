@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from core.node import BaseNode, Port, PortType, parse_type, file_in, string_in, Out, In
+from core.node import BaseNode, Port, PortType, parse_type, In, Out
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
 from nodes import NODE_CLASS_MAPPINGS
 
@@ -16,7 +16,7 @@ class SubgraphNode(BaseNode):
     body_color = "#142933"
     locked_title = True
 
-    graph_path = file_in(filter=[".srcsubgraph"], full_row=True, default="")
+    graph_path = In("ENUM", enum_filter=[".srcsubgraph"], full_row=True, default="", allow_connection=False)
 
     def on_property_changed(self):
         path = self.inputs.get("graph_path", {}).value if "graph_path" in self.inputs else ""
@@ -235,8 +235,8 @@ class SubgraphInputNode(BaseNode):
     color = "#28a1e7"
     body_color = "#142933"
 
-    port_name = string_in(default="input", display_in_inspector=False)
-    value = Out("*")
+    port_name = In("STRING", default="input", display_in_inspector=False)
+    value = Out("ANY")
 
     def __init__(self):
         super().__init__()
@@ -253,8 +253,8 @@ class SubgraphOutputNode(BaseNode):
     color = "#28a1e7"
     body_color = "#142933"
 
-    port_name = string_in(default="output", display_in_inspector=False)
-    value = In("*")
+    port_name = In("STRING", default="output", display_in_inspector=False)
+    value = In("ANY")
 
     def __init__(self):
         super().__init__()

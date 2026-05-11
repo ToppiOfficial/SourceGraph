@@ -319,33 +319,7 @@ class MainWindow(QMainWindow):
         # Floating View Controls Bar
         self.view_controls = QWidget(self.view)
         self.view_controls.setFixedHeight(40)
-        self.view_controls.setStyleSheet(f"""
-            QWidget {{
-                background-color: rgba(30, 30, 30, 230);
-                border: 1px solid {BORDER_DARK};
-                border-radius: 8px;
-            }}
-            QPushButton {{
-                background: transparent;
-                color: {FG_MAIN};
-                border: 1px solid transparent;
-                font-weight: bold;
-                padding: 4px 8px;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{ 
-                background: {BG_HOVER}; 
-                border: 1px solid {BORDER_LIGHT};
-            }}
-            QPushButton:checked {{ 
-                background: {BG_HOVER}; 
-                color: {BG_DARK};
-            }}
-            QPushButton:checked:hover {{ 
-                background: {ACCENT};
-                opacity: 0.8;
-            }}
-        """)
+        self.view_controls.setStyleSheet(VIEW_CONTROLS_STYLE)
         
         ctrl_layout = QHBoxLayout(self.view_controls)
         ctrl_layout.setContentsMargins(8, 0, 8, 0)
@@ -390,7 +364,7 @@ class MainWindow(QMainWindow):
         ctrl_layout.addWidget(self.minimap_colors_btn)
         
         self.minimap_links_btn = QPushButton()
-        self.minimap_links_btn.setIcon(create_icon(ShapeDrawer.draw_connection, IconColors.CONNECT, 14))
+        self.minimap_links_btn.setIcon(load_icon("curve", color=IconColors.CONNECT.name()))
         self.minimap_links_btn.setCheckable(True)
         self.minimap_links_btn.setChecked(True)
         self.minimap_links_btn.setToolTip("Toggle Links in Minimap")

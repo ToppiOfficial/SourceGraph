@@ -1,13 +1,11 @@
 from __future__ import annotations
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
-)
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit
+from gui.theme import *
+
 
 
 def make_file_picker(label_text: str, on_browse) -> tuple[QWidget, QLabel]:
     """Return a (container, label) pair: a label showing the current file name + a '...' browse button."""
-    from gui.theme import BTN_STYLE, NODE_FILE_LABEL_STYLE
-
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -28,8 +26,6 @@ def make_file_picker(label_text: str, on_browse) -> tuple[QWidget, QLabel]:
 
 def make_path_editor(value: str, on_change, on_browse) -> tuple[QWidget, QLineEdit]:
     """Return a (container, line_edit) pair: an editable path field + a '...' browse button."""
-    from gui.theme import BTN_STYLE, NODE_WIDGET_STYLE
-
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(2, 0, 2, 0)
@@ -54,18 +50,5 @@ def make_text_display() -> QTextEdit:
     display = QTextEdit()
     display.setReadOnly(True)
     display.setTabStopDistance(20)
-    display.setStyleSheet("""
-        QTextEdit {
-            background-color: #111111;
-            color: #f0f0f0;
-            border: 1px solid #444444;
-            border-radius: 3px;
-            padding: 4px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 10px;
-        }
-        QTextEdit:focus {
-            border: 1px solid #63c2df;
-        }
-    """)
+    display.setStyleSheet(NODE_TEXT_DISPLAY_STYLE)
     return display

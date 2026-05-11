@@ -20,6 +20,7 @@ from core.graph import Graph, Connection
 from core.node import PortType, port_uses_graph_variables
 from core.history import create_history_manager, HistoryManager
 from core.recent_nodes import add_recent_node
+from gui.widgets.icon_provider import load_pixmap
 from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
 from nodes.subgraph.subgraph_node import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
@@ -201,18 +202,7 @@ class NotificationPopup(QLabel):
         self.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
         bg_color = COLOR_INVALID if is_error else COLOR_VALID
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: {BG_DARKER};
-                color: {FG_MAIN};
-                border: 2px solid {bg_color};
-                border-radius: 8px;
-                padding: 9px 20px;
-                font-family: {FONT_MONO};
-                font-size: 12px;
-                font-weight: bold;
-            }}
-        """)
+        self.setStyleSheet(NOTIFICATION_STYLE.replace("{bg_color}", bg_color))
         
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.opacity_effect)
@@ -464,6 +454,18 @@ class NodeEditorScene(QGraphicsScene):
 
         with self._undo_manager.skip_undo():
             sub_graph.save(path)
+            
+            views = self.views()
+            if views:
+                window = views[0].window()
+                if window and hasattr(window, "panel_manager"):
+                    asset_panel = window.panel_manager.get_widget("AssetDock")
+                    if asset_panel:
+                        existing = set(asset_panel.tree_widget.all_paths())
+                        if path not in existing:
+                            asset_panel.tree_widget.add_asset(path)
+                            asset_panel._sync_to_graph()
+                            asset_panel.refresh_status()
 
         with self._undo_manager.transaction("Convert to Subgraph"):
             for it in items:
@@ -871,6 +873,7 @@ class NodeEditorScene(QGraphicsScene):
             if moves:
                 # Flush the node-position diff as a single named undo entry.
                 self._undo_manager.notify_immediate("Move Nodes")
+                self._emit_graph_changed()
             self._drag_start_states = {}
         if self._drag_conn and self._drag_port:
             if self._hover_port:

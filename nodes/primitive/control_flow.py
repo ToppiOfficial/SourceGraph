@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from core.node import BaseNode, In, any_in, bool_in, string_in, DynIn, Out
+from core.node import BaseNode, In, DynIn, Out
 
 
 class IfElseNode(BaseNode):
@@ -9,10 +9,10 @@ class IfElseNode(BaseNode):
     CATEGORY = "Conditional"
     color = "#ffb86c"
 
-    if_true = any_in(editable=False)
-    if_false = any_in(editable=False)
-    condition = bool_in(default=False)
-    output = Out("*")
+    if_true = In("ANY", editable=False)
+    if_false = In("ANY", editable=False)
+    condition = In("BOOL", default=False)
+    output = Out("ANY")
 
     def execute(self, if_true, if_false, condition: bool, **kwargs):
         return (if_true if condition else if_false,)
@@ -27,7 +27,7 @@ class FormulaIfNode(BaseNode):
     CATEGORY = "Conditional"
     color = "#ffb86c"
 
-    formula = string_in(default='input_1 == "value"')
+    formula = In("string", default='input_1 == "value"')
     input = DynIn(prefix="input")
     result = Out("BOOL")
 
@@ -56,10 +56,10 @@ class CaseNode(BaseNode):
     color = "#ffb86c"
 
     values = In("ARRAY")
-    selector = any_in()
-    default = any_in()
-    case = DynIn("*", prefix="case", editable=False)
-    result = Out("*")
+    selector = In("any")
+    default = In("any")
+    case = DynIn("ANY", prefix="case", editable=False)
+    result = Out("ANY")
 
     def execute(self, values: list, selector: Any, default: Any = None, **kwargs):
         if not isinstance(values, (list, tuple)):
@@ -88,7 +88,7 @@ class NOTNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input = any_in(editable=False)
+    input = In("any", editable=False)
     output = Out("BOOL")
 
     def execute(self, input, **kwargs):
@@ -101,7 +101,7 @@ class ANDNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input = DynIn("*", prefix="input", editable=False)
+    input = DynIn("ANY", prefix="input", editable=False)
     output = Out("BOOL")
 
     def execute(self, **kwargs):
@@ -117,7 +117,7 @@ class ORNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input = DynIn("*", prefix="input", editable=False)
+    input = DynIn("ANY", prefix="input", editable=False)
     output = Out("BOOL")
 
     def execute(self, **kwargs):
@@ -133,8 +133,8 @@ class XORNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input_a = any_in(editable=False)
-    input_b = any_in(editable=False)
+    input_a = In("ANY", editable=False)
+    input_b = In("ANY", editable=False)
     output = Out("BOOL")
 
     def execute(self, input_a, input_b, **kwargs):
@@ -149,8 +149,8 @@ class XNORNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input_a = any_in(editable=False)
-    input_b = any_in(editable=False)
+    input_a = In("ANY", editable=False)
+    input_b = In("ANY", editable=False)
     output = Out("BOOL")
 
     def execute(self, input_a, input_b, **kwargs):
@@ -165,7 +165,7 @@ class NANDNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input = DynIn("*", prefix="input", editable=False)
+    input = DynIn("ANY", prefix="input", editable=False)
     output = Out("BOOL")
 
     def execute(self, **kwargs):
@@ -181,7 +181,7 @@ class NORNode(BaseNode):
     CATEGORY = "Logic"
     color = "#8be9fd"
 
-    input = DynIn("*", prefix="input", editable=False)
+    input = DynIn("ANY", prefix="input", editable=False)
     output = Out("BOOL")
 
     def execute(self, **kwargs):

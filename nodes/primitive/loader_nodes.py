@@ -2,10 +2,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from core.node import (
-    BaseNode, In, OptIn, Out,
-    string_in, any_in, file_out, string_out, any_out,
-)
+from core.node import BaseNode, In, OptIn, Out
 
 
 class FileLoader(BaseNode):
@@ -14,9 +11,11 @@ class FileLoader(BaseNode):
     CATEGORY = "Primitives"
     color = "#ce9178"
     locked_title = True
+    default_width = 225
 
     asset = In("FILE", default="", allow_connection=False, editable=True, full_row=True)
     file  = Out("FILE")
+    absolute_path = In("BOOL", label="absolute path",default=False, allow_connection=False)
 
     def on_property_changed(self):
         input_port = self.inputs.get("asset")
@@ -92,8 +91,8 @@ class FileLoader(BaseNode):
                 if item:
                     item.refresh()
 
-    def execute(self, asset: str, **kwargs):
-        path = self.validate_file_input(asset, must_exist=True)
+    def execute(self, asset: str, absolute_path: bool = False, **kwargs):
+        path = self.validate_file_input(asset, must_exist=True, absolute_path=absolute_path)
         return (path,)
 
 
@@ -105,7 +104,7 @@ class VariableOutNode(BaseNode):
     locked_title = True
 
     var_name = In("ENUM", default="", allow_connection=False, graph_enum="variables", label="variable")
-    value    = Out("*")
+    value    = Out("ANY")
 
     def get_reads(self) -> set[str]:
         p = self.inputs.get("var_name")
@@ -133,7 +132,7 @@ class VariableInNode(BaseNode):
     locked_title = True
 
     var_name  = In("ENUM", default="", allow_connection=False, graph_enum="variables", label="variable")
-    new_value = OptIn("*", editable=False)
+    new_value = OptIn("ANY", editable=False)
 
     def get_writes(self) -> set[str]:
         p = self.inputs.get("var_name")
@@ -220,7 +219,7 @@ class ReadFile(BaseNode):
     color = "#ce9178"
 
     file    = In("FILE", default="", allow_connection=True, editable=False)
-    content = Out("*")
+    content = Out("ANY")
 
     def execute(self, file: str, **kwargs):
         path = self.resolve_path(file)
@@ -243,7 +242,7 @@ class OutputToFileNode(BaseNode):
     locked_title = True
 
     out_path = In("STRING", default="", full_row=True, allow_connection=False)
-    content  = OptIn("*", editable=False)
+    content  = OptIn("ANY", editable=False)
 
     def on_property_changed(self):
         port = self.inputs.get("out_path")

@@ -1,4 +1,5 @@
-from core.node import BaseNode, In, DynIn, Out, string_in, any_out, command_out, dyn_in
+from __future__ import annotations
+from core.node import BaseNode, In, DynIn, Out
 from nodes.qc.shared_categories import QC_CATEGORY
 
 
@@ -8,8 +9,8 @@ class ModelNameNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    model_path = string_in(default="models/mymodel/model.mdl", full_row=True)
-    command    = Out("COMMAND")
+    model_path = In("STRING", default="models/mymodel/model.mdl", full_row=True)
+    command    = Out("QC_COMMAND")
 
     def execute(self, model_path: str, **kwargs):
         return (f'$modelname "{model_path}"',)
@@ -21,8 +22,8 @@ class CDMaterialsNode(BaseNode):
     CATEGORY = QC_CATEGORY
     color = "#2a5a3a"
 
-    path    = string_in(default="models/mymodel/")
-    command = Out("COMMAND")
+    path    = In("STRING", default="models/mymodel/")
+    command = Out("QC_COMMAND")
 
     def execute(self, path: str, **kwargs):
         return (f'$cdmaterials "{path}"',)
@@ -35,8 +36,8 @@ class QCJoinNode(BaseNode):
     color = "#7a2d2d"
     body_color = "#2b1010"
 
-    cmds    = DynIn("*", prefix="command", editable=False)
-    command = Out("COMMAND")
+    cmds    = DynIn("ANY", prefix="command", editable=False)
+    command = Out("QC_COMMAND")
 
     def execute(self, **kwargs):
         parts = self.collect_dynamic("command", kwargs)

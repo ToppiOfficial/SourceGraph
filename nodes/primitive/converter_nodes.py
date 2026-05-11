@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from core.node import BaseNode, PortType, any_in, string_in, float_in, int_in, Out
+from core.node import BaseNode, In, Out, OptIn
 
 class ConverterNode:
     CATEGORY = "Converters"
@@ -12,7 +12,7 @@ class ToStringNode(ConverterNode, BaseNode):
     """Converts any value to a string representation."""
     title = "To String"
 
-    value = any_in()
+    value = OptIn("ANY")
     string = Out("STRING")
 
     def execute(self, value, **kwargs):
@@ -24,7 +24,7 @@ class ToIntNode(ConverterNode, BaseNode):
     """Converts a value to an integer. Handles float strings and rounding."""
     title = "To Integer"
 
-    value = any_in()
+    value = OptIn("ANY")
     int_out = Out("INT")
 
     def execute(self, value, **kwargs):
@@ -38,7 +38,7 @@ class ToFloatNode(ConverterNode, BaseNode):
     """Converts a value to a floating point number."""
     title = "To Float"
 
-    value = any_in()
+    value = OptIn("ANY")
     float_out = Out("FLOAT")
 
     def execute(self, value, **kwargs):
@@ -51,7 +51,7 @@ class ToBoolNode(ConverterNode, BaseNode):
     """Converts a value to a boolean using Python's default truthiness logic."""
     title = "To Boolean"
 
-    value = any_in()
+    value = OptIn("ANY")
     bool_out = Out("BOOL")
 
     def execute(self, value, **kwargs):
@@ -62,7 +62,7 @@ class ToDictNode(ConverterNode, BaseNode):
     """Parses a JSON string into a dictionary object."""
     title = "To Dictionary"
 
-    json_string = string_in(default="{}")
+    json_string = In("STRING", default="{}")
     dict_out = Out("DICT")
 
     def execute(self, json_string: str, **kwargs):
@@ -78,7 +78,7 @@ class ToListNode(ConverterNode, BaseNode):
     """Converts a value to a list. Parses JSON strings or wraps single items."""
     title = "To List"
 
-    value = any_in()
+    value = OptIn("ANY")
     list_out = Out("ARRAY")
 
     def execute(self, value, **kwargs):
@@ -101,7 +101,7 @@ class LengthNode(ConverterNode, BaseNode):
     """Returns the count of items in a list or characters in a string."""
     title = "Length"
 
-    value = any_in()
+    value = OptIn("ANY")
     len_out = Out("INT")
 
     def execute(self, value, **kwargs):
@@ -114,8 +114,8 @@ class RoundNode(ConverterNode, BaseNode):
     """Rounds a number to the specified decimal places."""
     title = "Round"
 
-    value = float_in(default=0.0)
-    decimals = int_in(default=0)
+    value = In("FLOAT", default=0.0)
+    decimals = In("INT", default=0)
     rounded = Out("FLOAT")
 
     def execute(self, value: float, decimals: int, **kwargs):
@@ -130,7 +130,7 @@ class AbsoluteNode(ConverterNode, BaseNode):
     """Returns the absolute (positive) value of a number."""
     title = "Absolute"
 
-    value = float_in(default=0.0)
+    value = In("FLOAT", default=0.0)
     abs_out = Out("FLOAT")
 
     def execute(self, value: float, **kwargs):
@@ -143,7 +143,7 @@ class PathNormalizeNode(ConverterNode, BaseNode):
     """Normalizes a file path, ensuring consistent separators."""
     title = "Normalize Path"
 
-    path = string_in(default="")
+    path = In("STRING", default="")
     normalized = Out("STRING")
 
     def execute(self, path: str, **kwargs):
@@ -155,8 +155,8 @@ class StringSplitNode(ConverterNode, BaseNode):
     """Splits a string into a list using a specified separator."""
     title = "String Split"
 
-    text = string_in(default="")
-    separator = string_in(default=",")
+    text = In("STRING", default="")
+    separator = In("STRING", default=",")
     list_out = Out("ARRAY")
 
     def execute(self, text: str, separator: str, **kwargs):
@@ -170,8 +170,8 @@ class RegexMatchNode(ConverterNode, BaseNode):
     """Finds all occurrences of a regex pattern in a string."""
     title = "Regex Match"
 
-    text = string_in(default="")
-    pattern = string_in(default="")
+    text = In("STRING", default="")
+    pattern = In("STRING", default="")
     matches = Out("ARRAY")
 
     def execute(self, text: str, pattern: str, **kwargs):
@@ -187,9 +187,9 @@ class RegexReplaceNode(ConverterNode, BaseNode):
     """Replaces occurrences of a regex pattern with a replacement string."""
     title = "Regex Replace"
 
-    text = string_in(default="")
-    pattern = string_in(default="")
-    replacement = string_in(default="")
+    text = In("STRING", default="")
+    pattern = In("STRING", default="")
+    replacement = In("STRING", default="")
     text_out = Out("STRING")
 
     def execute(self, text: str, pattern: str, replacement: str, **kwargs):
