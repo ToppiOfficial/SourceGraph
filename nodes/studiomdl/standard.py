@@ -1,6 +1,6 @@
 from __future__ import annotations
 from core.node import BaseNode, In, DynIn, Out
-from nodes.studiomdl.shared import QC_CATEGORY
+from nodes.studiomdl.shared import QC_CATEGORY, MATERIAL_CATEGORY
 
 
 class ModelNameNode(BaseNode):
@@ -19,7 +19,7 @@ class ModelNameNode(BaseNode):
 class CDMaterialsNode(BaseNode):
     """Generates $cdmaterials QC command."""
     title = "CD Materials"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = MATERIAL_CATEGORY
     color = "#2a5a3a"
 
     path    = In("STRING", default="models/mymodel/")

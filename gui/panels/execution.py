@@ -474,6 +474,10 @@ class ExecutionPanel(QWidget):
         if self._scene:
             # Also update the graph's execution sessions for persistence
             self.graph.execution_sessions = self.get_project_state()
+
+            for item in self._scene._node_items.values():
+                item.refresh()
+
             self._scene.graph_changed.emit()
 
     def get_project_state(self) -> dict:
@@ -536,6 +540,11 @@ class ExecutionPanel(QWidget):
             
         # Ensure the list UI matches the now-restored current session
         self._refresh_node_list()
+
+        # Sync the graph's execution sessions so SessionNodes can resolve names correctly
+        if self.graph:
+            self.graph.execution_sessions = self.get_project_state()
+
         if self.current_session:
             self.session_rename_edit.blockSignals(True)
             self.session_rename_edit.setText(self.current_session.name)

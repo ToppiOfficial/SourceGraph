@@ -424,10 +424,52 @@ class BaseNode:
         for port in self.inputs.values():
             if port.port_type != PortType.ENUM or port.enum_options is not None:
                 continue
-            if port_uses_graph_variables(port):
+            
+            if port.graph_enum == "session_items":
+                self._reconcile_sessions_enum(port)
+            elif port_uses_graph_variables(port):
                 self._reconcile_variables_enum(port)
             else:
                 self._reconcile_assets_enum(port)
+
+    def _reconcile_sessions_enum(self, port: Port) -> None:
+        exec_data = getattr(self.graph, "execution_sessions", [])
+        if not exec_data:
+            return
+        
+        sessions_list = []
+        if isinstance(exec_data, dict):
+            sessions_list = exec_data.get("sessions", [])
+        elif isinstance(exec_data, list):
+            sessions_list = exec_data
+
+        pv = str(port.value) if port.value else ""
+        if not pv or "|" not in pv:
+            return
+
+        parts = pv.split("|", 1)
+        if len(parts) < 2:
+            return
+        s_name, node_id = parts
+        
+        found_session = None
+        for s_data in sessions_list:
+            if s_data.get("name") == s_name:
+                found_session = s_data
+                if node_id in s_data.get("node_ids", []):
+                    return
+                break
+
+        # Not valid in current session. Try to find node_id in ANY session for fuck sake!
+        matches = []
+        for s_data in sessions_list:
+            if node_id in s_data.get("node_ids", []):
+                matches.append(s_data.get("name"))
+        
+        if len(matches) == 1:
+            port.value = f"{matches[0]}|{node_id}"
+        else:
+            port.value = ""
 
     def _reconcile_variables_enum(self, port: Port) -> None:
         vars_dict = getattr(self.graph, "variables", None) or {}

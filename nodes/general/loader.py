@@ -207,6 +207,21 @@ class SessionNode(BaseNode):
 
         port = self.inputs.get("session_item")
         val = port.value if port and port.value else ""
+
+        if not self.graph:
+            # During loading, we might not have the graph yet.
+            # We should keep the value so it's not lost.
+            #
+            # I feel like the source of the problem is due to poor 
+            # implementation but this is fine for now.
+            self.title = "Session"
+            if hasattr(self, "_session_label"):
+                try:
+                    self._session_label.setText("Select session…")
+                except RuntimeError:
+                    pass
+            return
+
         name = self._get_clean_name(val)
         
         if val and not name:
