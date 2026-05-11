@@ -6,6 +6,8 @@
 
 **SrcGraph** is an experimental node-graph based tool built with Python 3.14 and PySide6 (Qt). It is designed to provide a flexible and extensible environment for visual logic orchestration, with a particular focus on Source Engine (QC) model processing and general-purpose primitive operations.
 
+<img width="1920" height="1032" alt="Screenshot 2026-05-11 031203" src="https://github.com/user-attachments/assets/bb48494e-b41b-4a1e-9fe6-698c6ac43d06" />
+
 ## ⚠️ Alpha Warning
 
 **This project is currently in Alpha.**
