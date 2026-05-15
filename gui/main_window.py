@@ -83,10 +83,12 @@ class MainWindow(QMainWindow):
         self._recent_files = []
         self._dirty = False
         self._is_switching = False
-        
+        self._disabled_plugins: set[str] = set()
+
         # Settings
         self._show_full_path_in_title = False  # Default to show just filename
-        
+
+        self._pre_load_disabled_plugins()
         self._build_toolbar()
         self._setup_shortcuts()
         
@@ -105,7 +107,8 @@ class MainWindow(QMainWindow):
         self.scene.graph_changed.connect(self._on_changed)
 
         self._load_plugins()
-        
+        self.panel_manager.load_and_setup_plugin_panels()
+
         default_ws = self._get_default_workspace_path()
         self._load_layout(default_ws)
         self._load_config()
@@ -289,6 +292,9 @@ class MainWindow(QMainWindow):
         time_group.addAction(self.unit_ms_act)
         settings_menu.addAction(self.unit_s_act)
         settings_menu.addAction(self.unit_ms_act)
+
+        settings_menu.addSeparator()
+        settings_menu.addAction("Manage Plugins...", self._open_plugin_manager)
 
         settings_button = QToolButton()
         settings_button.setText("Settings")
@@ -484,7 +490,8 @@ class MainWindow(QMainWindow):
                 "last_project": self._project_path,
                 "time_unit": self.graph.time_unit,
                 "wire_style": ConnectionItem.wire_style,
-                "minimap": self.get_external_state().get("minimap", {})
+                "minimap": self.get_external_state().get("minimap", {}),
+                "disabled_plugins": sorted(self._disabled_plugins),
             }
             with open(config_path, 'w') as f:
                 json.dump(config_data, f, indent=4)
@@ -499,6 +506,8 @@ class MainWindow(QMainWindow):
         try:
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
+            self._disabled_plugins = set(config_data.get("disabled_plugins", []))
+
             if "recent_files" in config_data:
                 self._recent_files = config_data["recent_files"]
                 self._update_recent_files_menu()
@@ -739,11 +748,11 @@ class MainWindow(QMainWindow):
 
     def remove_asset(self, path: str) -> None:
         """Remove an asset from the project and update all panels."""
-        if path not in self.graph.assets:
+        if path not in self.graph.get_ext_store("assets", []):
             return
 
         with self.scene._undo_manager.transaction(f"Remove Asset: {os.path.basename(path)}"):
-            self.graph.assets.remove(path)
+            self.graph.get_ext_store("assets", []).remove(path)
 
             self.scene.on_asset_removed(path)
 
@@ -793,14 +802,42 @@ class MainWindow(QMainWindow):
         if hasattr(self.scene, '_undo_manager'):
             self.scene._undo_manager.set_node_registry(NODE_CLASS_MAPPINGS)
 
+    def _pre_load_disabled_plugins(self) -> None:
+        """Read only disabled_plugins from config before plugins are discovered."""
+        config_path = self._get_config_path()
+        if not os.path.exists(config_path):
+            return
+        try:
+            with open(config_path, "r") as f:
+                data = json.load(f)
+            self._disabled_plugins = set(data.get("disabled_plugins", []))
+        except Exception:
+            pass
+
     def _load_plugins(self) -> None:
         """Discover and load plugins from the plugins/ directory."""
         from core.plugin_loader import PluginLoader
         from core.registry import get_default_registry
         plugins_dir = Path(__file__).parent.parent / "plugins"
-        loaded = PluginLoader(get_default_registry()).discover(plugins_dir)
+        loaded = PluginLoader(get_default_registry()).discover(plugins_dir, disabled=self._disabled_plugins)
         if loaded:
             log.info(f"Loaded plugins: {', '.join(loaded)}")
+
+    def _open_plugin_manager(self) -> None:
+        from gui.menu.plugin_manager_dialog import PluginManagerDialog
+        plugins_dir = Path(__file__).parent.parent / "plugins"
+        dlg = PluginManagerDialog(plugins_dir, self._disabled_plugins, parent=self)
+        if dlg.exec() == PluginManagerDialog.Accepted:
+            new_disabled = dlg.get_disabled()
+            if new_disabled != self._disabled_plugins:
+                self._disabled_plugins = new_disabled
+                self._save_config()
+                btn = QMessageBox.question(
+                    self, "Restart Required",
+                    "Plugin changes will take effect after restart.\nRestart now?",
+                )
+                if btn == QMessageBox.Yes:
+                    self._reload()
 
     def _new(self) -> None:
         if not self._maybe_save(): return
@@ -1105,7 +1142,7 @@ class MainWindow(QMainWindow):
             if getattr(new_graph, '_missing_plugins', []):
                 QTimer.singleShot(0, lambda g=new_graph: self._prompt_missing_plugins(g))
 
-            missing = [p for p in new_graph.assets if not os.path.exists(p)]
+            missing = [p for p in new_graph.get_ext_store("assets", []) if not os.path.exists(p)]
             if missing:
                 for p in missing:
                     log.info(f"[Assets] Missing file: {p}")

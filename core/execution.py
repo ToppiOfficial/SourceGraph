@@ -207,15 +207,17 @@ class StandardExecutionEngine:
                 if in_deg[nb] == 0:
                     queue.append(nb)
         
-        # Capture variables to revert them after execution
-        original_vars = copy.deepcopy(graph.variables)
+        from core.graph_store_registry import get_volatile_store_specs
+        volatile_backup: dict[str, Any] = {}
+        for spec in get_volatile_store_specs():
+            volatile_backup.update(spec.dump(graph))
+        volatile_backup = copy.deepcopy(volatile_backup)
         try:
             # Execute nodes in topological order
             for nid in execution_order:
                 results[nid] = self.execute_node(nid, graph, context, results)
         finally:
-            graph.variables.clear()
-            graph.variables.update(original_vars)
+            graph._state.ext_stores.update(volatile_backup)
         
         return results
     

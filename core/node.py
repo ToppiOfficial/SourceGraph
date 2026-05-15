@@ -21,7 +21,6 @@ class PortType(str, Enum):
     FILE       = "file"
     BOOL       = "bool"
     ENUM       = "enum"
-    QC_COMMAND = "qc_command"
     DICT       = "dict"
     ARRAY      = "array"
     SIGNAL     = "signal"
@@ -35,18 +34,33 @@ PORT_COLORS: dict[PortType, str] = {
     PortType.FILE:       "#ce9178",
     PortType.BOOL:       "#ff8c00",
     PortType.ENUM:       "#b4629d",
-    PortType.QC_COMMAND: "#dcdcaa",
     PortType.DICT:       "#ef8ed8",
     PortType.ARRAY:      "#bd93f9",
     PortType.SIGNAL:     "#f1fa8c",
 }
+
+from core.port_type_registry import register_port_type as _rpt, PortTypeSpec as _PTS
+for _k, _c, _e, _ie, _al in [
+    ("any",        "#aaaaaa", True,  False, ["*"]),
+    ("string",     "#4ec9b0", True,  True,  ["str"]),
+    ("int",        "#569cd6", True,  True,  []),
+    ("float",      "#9cdcfe", True,  True,  ["number"]),
+    ("file",       "#ce9178", True,  True,  ["path"]),
+    ("bool",       "#ff8c00", True,  True,  ["boolean"]),
+    ("enum",       "#b4629d", True,  True,  []),
+    ("dict",       "#ef8ed8", False, False, ["object"]),
+    ("array",      "#bd93f9", False, False, ["list"]),
+    ("signal",     "#f1fa8c", False, False, ["flow"]),
+]:
+    _rpt(_PTS(key=_k, color=_c, editable=_e, inspector_editable=_ie, aliases=_al))
+del _rpt, _PTS, _k, _c, _e, _ie, _al
 
 
 @dataclass
 class Port:
     name:      str
     is_input:  bool
-    port_type: PortType = PortType.ANY
+    port_type: PortType | str = PortType.ANY
     node_id:   str      = ""
     value:     Any      = None
     label:     str      = ""
@@ -108,8 +122,6 @@ TYPE_MAP: dict[str, PortType] = {
     "bool": PortType.BOOL,
     "boolean": PortType.BOOL,
     "enum": PortType.ENUM,
-    "command": PortType.QC_COMMAND,
-    "qc_command": PortType.QC_COMMAND,
     "dict": PortType.DICT,
     "object": PortType.DICT,
     "array": PortType.ARRAY,
@@ -119,8 +131,13 @@ TYPE_MAP: dict[str, PortType] = {
 }
 
 
-def parse_type(type_str: str) -> PortType:
-    return TYPE_MAP.get(type_str.lower(), PortType.ANY)
+def parse_type(type_str: str) -> PortType | str:
+    key = type_str.lower()
+    builtin = TYPE_MAP.get(key)
+    if builtin is not None:
+        return builtin
+    from core.port_type_registry import resolve_alias
+    return resolve_alias(key)
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +460,10 @@ class BaseNode:
                 continue
             key = port.graph_enum
             if key is None:
-                key = "variables" if port_uses_graph_variables(port) else "assets"
+                if port.name == "var_name":
+                    key = "variables"
+                else:
+                    continue
             provider = get_enum_provider(key)
             if provider:
                 provider.resolve(self.graph, port)

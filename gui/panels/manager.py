@@ -78,6 +78,16 @@ class PanelManager:
         panel = self.get_panel(panel_id)
         return panel.get_widget() if panel else None
 
+    def load_and_setup_plugin_panels(self) -> None:
+        """Instantiate and initialize panels registered by plugins. Called after _load_plugins()."""
+        from core.panel_registry import get_plugin_panels
+        for panel_class in get_plugin_panels():
+            if panel_class.ID not in self.panels:
+                self._instantiate_panel(panel_class)
+                panel = self.panels.get(panel_class.ID)
+                if panel:
+                    panel.setup()
+
     def update_context(self, graph, scene):
         """Propagate graph/scene changes to all panels."""
         for panel in self.panels.values():

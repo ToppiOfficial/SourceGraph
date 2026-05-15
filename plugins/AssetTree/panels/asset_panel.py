@@ -119,15 +119,15 @@ class AssetBrowserWidget(BaseBrowserWidget):
         self.tree_widget.hierarchyChanged.connect(self._on_hierarchy_changed)
 
     def _do_refresh(self):
-        layout = self.main_window.graph.asset_layout
+        layout = self.main_window.graph.get_ext_store("asset_layout")
         if layout is not None:
             self.set_assets(layout)
         else:
-            self.set_assets(self.main_window.graph.assets)
+            self.set_assets(self.main_window.graph.get_ext_store("assets", []))
 
     def _do_sync(self):
-        self.main_window.graph.assets = self.tree_widget.all_paths()
-        self.main_window.graph.asset_layout = self.get_hierarchy()
+        self.main_window.graph.set_ext_store("assets", self.tree_widget.all_paths())
+        self.main_window.graph.set_ext_store("asset_layout", self.get_hierarchy())
         self.main_window.graph._notify()
         self.refresh_status()
         self.main_window.scene.graph_changed.emit()

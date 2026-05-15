@@ -10,14 +10,20 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QComboBox,
     QScrollArea,
     QFileDialog,
+    QFrame,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QCursor, QPainter
+from PySide6.QtWidgets import QApplication
 
-from core.node import port_uses_graph_variables, PortType
-from PySide6.QtGui import QColor
+from core.node import port_uses_graph_variables, PortType, PORT_COLORS
+from core.port_type_registry import (
+    get_color as _get_port_color,
+    is_inspector_editable as _type_inspector_editable,
+    get_port_type_spec as _get_type_spec,
+)
 from gui.theme import *
 from gui.items.node import NodeItem
 from gui.panels.base_panel import BasePanel
@@ -25,21 +31,9 @@ from gui.panels.base_panel import BasePanel
 if TYPE_CHECKING:
     from gui.main_window import MainWindow
 
-def _populate_asset_combo(combo: QComboBox, port, graph) -> None:
-    assets = getattr(graph, "assets", []) or []
-    ext_filter = port.enum_filter
-    for asset_path in assets:
-        if ext_filter and os.path.splitext(asset_path)[1].lower() not in ext_filter:
-            continue
-        combo.addItem(os.path.basename(asset_path), asset_path)
 
-
-def _populate_variable_combo(combo: QComboBox, graph) -> None:
-    for var_name in (getattr(graph, "variables", {}) or {}).keys():
-        combo.addItem(var_name, var_name)
-
-
-_EDITABLE = {PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM, PortType.FILE}
+def _port_is_editable(port_type) -> bool:
+    return _type_inspector_editable(port_type)
 
 
 def _validate_port_text(port_type: PortType, text: str) -> str | None:
@@ -58,8 +52,77 @@ def _validate_port_text(port_type: PortType, text: str) -> str | None:
     return None
 
 
+_TITLE_EDIT_STYLE = f"""
+QLineEdit {{
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
+    color: {FG_BRIGHT};
+    font-size: 12px;
+    font-weight: bold;
+    font-family: "Roboto", "Segoe UI";
+    padding: 0px 0px 1px 0px;
+}}
+QLineEdit:focus {{
+    border-bottom: 1px solid {ACCENT};
+}}
+"""
+
+_SECTION_LABEL_STYLE = (
+    f"color: {FG_DIMMER}; font-size: 10px; font-weight: bold; "
+    f"padding: 6px 10px 2px 10px; letter-spacing: 1px; background: transparent;"
+)
+_PORT_LABEL_STYLE  = f"color: {FG_DEFAULT}; font-size: 12px; background: transparent;"
+_CONN_HINT_STYLE   = f"color: {FG_DIMMER}; font-size: 11px; font-style: italic; background: transparent;"
+_MAX_WIDGET_W      = 140  # mirrors ~120-140 px widget width in a DEFAULT_W=180 node
+
+
+class PortDot(QWidget):
+    """Colored circle matching the port dot drawn on nodes in the graph editor."""
+
+    def __init__(self, color: str, parent=None) -> None:
+        super().__init__(parent)
+        self._color = QColor(color)
+        self.setFixedSize(12, 12)
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(self._color)
+        p.setPen(self._color.darker(150))
+        p.drawEllipse(1, 1, 10, 10)
+
+
+def _make_separator() -> QFrame:
+    sep = QFrame()
+    sep.setFrameShape(QFrame.Shape.HLine)
+    sep.setStyleSheet(
+        f"background: {BORDER_DARK}; border: none; max-height: 1px; margin: 2px 0px;"
+    )
+    return sep
+
+
+def _position_near_cursor(dialog) -> None:
+    """Move a dialog to appear near the cursor, clamped to the current screen."""
+    pos = QCursor.pos()
+    screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
+    avail = screen.availableGeometry()
+
+    dialog.adjustSize()
+    dw = dialog.sizeHint().width()
+    dh = dialog.sizeHint().height()
+
+    x = pos.x() + 14
+    y = pos.y() - dh // 2
+
+    x = max(avail.left(), min(x, avail.right() - dw))
+    y = max(avail.top(), min(y, avail.bottom() - dh))
+
+    dialog.move(x, y)
+
+
 class SelectedNodePanel(QWidget):
-    """Edits the single selected node's title (if allowed) and disconnected inputs."""
+    """Mirrors the selected node's visual structure for inline property editing."""
 
     def __init__(self, main_window: MainWindow, parent=None) -> None:
         super().__init__(parent)
@@ -69,47 +132,95 @@ class SelectedNodePanel(QWidget):
         self._suppress_refresh = False
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 6, 6, 6)
-        outer.setSpacing(6)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        self._subtitle = QLabel("")
-        self._subtitle.setStyleSheet(f"color:{FG_DIM}; font-size:14px;")
-        self._subtitle.setWordWrap(True)
-        outer.addWidget(self._subtitle)
+        # Placeholder when 0 or 2+ nodes are selected
+        self._placeholder = QLabel("Select a single node to edit its properties here.")
+        self._placeholder.setStyleSheet(f"color:{FG_DIM}; font-size:13px; padding:16px;")
+        self._placeholder.setWordWrap(True)
+        self._placeholder.setAlignment(Qt.AlignCenter)
+        outer.addWidget(self._placeholder)
 
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Node mirror container
+        self._mirror = QWidget()
+        self._mirror.setObjectName("NodeMirror")
+        self._mirror.setVisible(False)
+        ml = QVBoxLayout(self._mirror)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(0)
+
+        # Title frame
+        self._title_frame = QWidget()
+        self._title_frame.setObjectName("NodeMirrorTitle")
+        self._title_frame.setStyleSheet(
+            "QWidget#NodeMirrorTitle { background: #181818; border-radius: 6px 6px 0px 0px; }"
+        )
+        tf = QVBoxLayout(self._title_frame)
+        tf.setContentsMargins(10, 8, 10, 6)
+        tf.setSpacing(1)
+
+        self._title_edit = QLineEdit()
+        self._title_edit.setStyleSheet(_TITLE_EDIT_STYLE)
+        self._title_edit.editingFinished.connect(self._on_title_finished)
+        tf.addWidget(self._title_edit)
+
+        self._class_label = QLabel()
+        self._class_label.setStyleSheet(
+            f"color:{FG_DIM}; font-size:10px; background:transparent;"
+        )
+        tf.addWidget(self._class_label)
+
+        ml.addWidget(self._title_frame)
+
+        # Scrollable port body
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
 
         self._body = QWidget()
+        self._body.setStyleSheet("background: transparent;")
         self._rows = QVBoxLayout(self._body)
-        self._rows.setSpacing(6)
+        self._rows.setContentsMargins(0, 4, 0, 8)
+        self._rows.setSpacing(0)
         self._rows.addStretch()
-        self._scroll.setWidget(self._body)
-        outer.addWidget(self._scroll, 1)
+
+        scroll.setWidget(self._body)
+        ml.addWidget(scroll, 1)
+
+        outer.addWidget(self._mirror, 1)
+
+    # ------------------------------------------------------------------
+    # Public
+    # ------------------------------------------------------------------
 
     def refresh(self) -> None:
         if self._suppress_refresh:
             return
         scene = self.main_window.scene
         try:
-            # Safety check: avoid crash if the C++ scene object was already deleted
             selected = [i for i in scene.selectedItems() if isinstance(i, NodeItem)]
         except RuntimeError:
             return
-            
+
         if len(selected) != 1:
             self._build_empty(len(selected))
             return
         self._build_for_node(selected[0])
 
+    # ------------------------------------------------------------------
+    # Build helpers
+    # ------------------------------------------------------------------
+
     def _build_empty(self, n_selected: int) -> None:
         self._item = None
-        self._clear_rows()
+        self._mirror.setVisible(False)
+        self._placeholder.setVisible(True)
         if n_selected == 0:
-            self._subtitle.setText("Select a single node to edit its properties here.")
+            self._placeholder.setText("Select a single node to edit its properties here.")
         else:
-            self._subtitle.setText("Select only one node to use the inspector.")
+            self._placeholder.setText("Select only one node to use the inspector.")
 
     def _clear_rows(self) -> None:
         while self._rows.count() > 1:
@@ -118,114 +229,152 @@ class SelectedNodePanel(QWidget):
             if w:
                 w.deleteLater()
 
+    def _insert(self, widget: QWidget, at: int) -> None:
+        self._rows.insertWidget(at, widget)
+
     def _build_for_node(self, item: NodeItem) -> None:
         self._item = item
         node = item.node
         self._clear_rows()
 
-        self._subtitle.setText(f"{node.__class__.__name__}  ·  {node.id[:8]}…")
+        # Update title frame
+        self._title_edit.setText(node.display_name)
+        self._title_edit.setReadOnly(getattr(node, "locked_title", False))
+        self._class_label.setText(f"{node.__class__.__name__}  ·  {node.id[:8]}…")
 
-        title_row = QWidget()
-        tl = QHBoxLayout(title_row)
-        tl.setContentsMargins(0, 0, 0, 0)
-        tl.addWidget(QLabel("Title"))
-        if getattr(node, "locked_title", False):
-            tl.addWidget(QLabel(node.display_name), 1)
-        else:
-            self._title_edit = QLineEdit(node.display_name)
-            self._title_edit.setStyleSheet(EDIT_STYLE)
-            self._title_edit.editingFinished.connect(self._on_title_finished)
-            tl.addWidget(self._title_edit, 1)
-        self._rows.insertWidget(0, title_row)
+        self._placeholder.setVisible(False)
+        self._mirror.setVisible(True)
 
         scene = self.main_window.scene
         graph = scene.graph
-        insert_at = 1
-        for pname, port in node.inputs.items():
-            if not port.display_in_inspector:
-                continue
-            if not port.editable and port.port_type not in _EDITABLE:
-                continue
-            conn = scene.graph.get_input_connection(node.id, pname)
+        at = 0
+
+        # Outputs section
+        visible_out = [
+            (pname, port) for pname, port in node.outputs.items()
+            if port.display_in_inspector
+        ]
+        if visible_out:
+            sec = QLabel("OUTPUTS")
+            sec.setStyleSheet(_SECTION_LABEL_STYLE)
+            self._insert(sec, at); at += 1
+            for pname, port in visible_out:
+                self._insert(self._make_output_row(pname, port), at); at += 1
+            self._insert(_make_separator(), at); at += 1
+
+        # Inputs section
+        visible_in = [
+            (pname, port) for pname, port in node.inputs.items()
+            if port.display_in_inspector and (port.editable or _port_is_editable(port.port_type))
+        ]
+        if visible_in:
+            sec = QLabel("INPUTS")
+            sec.setStyleSheet(_SECTION_LABEL_STYLE)
+            self._insert(sec, at); at += 1
+            for pname, port in visible_in:
+                conn = graph.get_input_connection(node.id, pname)
+                row = self._make_input_row(pname, port, conn, graph, node)
+                if row is not None:
+                    self._insert(row, at); at += 1
+
+    # ------------------------------------------------------------------
+    # Row factories
+    # ------------------------------------------------------------------
+
+    def _make_output_row(self, pname: str, port) -> QWidget:
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(10, 3, 10, 3)
+        rl.setSpacing(6)
+        lbl = QLabel(port.label or pname)
+        lbl.setStyleSheet(_PORT_LABEL_STYLE)
+        lbl.setWordWrap(True)
+        rl.addWidget(lbl, 1)
+        dot = PortDot(_get_port_color(port.port_type))
+        rl.addWidget(dot, 0, Qt.AlignVCenter)
+        return row
+
+    def _make_input_row(self, pname: str, port, conn, graph, node) -> QWidget | None:
+        # Check for a custom widget from the node first
+        custom_w = None
+        if not conn and hasattr(node, "create_widget_for_port"):
+            custom_w = node.create_widget_for_port(port)
+
+        if custom_w is not None:
             row = QWidget()
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(6)
-            lbl = QLabel(port.label or pname)
-            lbl.setMinimumWidth(72)
-            lbl.setStyleSheet(f"color:{FG_MAIN};")
-            rl.addWidget(lbl)
-
-            custom_w = None
-            if not conn and hasattr(node, 'create_widget_for_port'):
-                custom_w = node.create_widget_for_port(port)
-            if custom_w is not None:
+            row.setStyleSheet("background: transparent;")
+            if port.full_row:
+                rl = QVBoxLayout(row)
+                rl.setContentsMargins(8, 2, 8, 2)
+                rl.setSpacing(0)
+                rl.addWidget(custom_w)
+            else:
+                rl = QHBoxLayout(row)
+                rl.setContentsMargins(10, 3, 10, 3)
+                rl.setSpacing(6)
+                rl.addWidget(PortDot(_get_port_color(port.port_type)), 0, Qt.AlignVCenter)
+                lbl = QLabel(port.label or pname)
+                lbl.setStyleSheet(_PORT_LABEL_STYLE)
+                rl.addWidget(lbl)
                 rl.addWidget(custom_w, 1)
-                self._rows.insertWidget(insert_at, row)
-                insert_at += 1
-                continue
+            return row
 
-            if conn:
-                src = graph.nodes.get(conn.src_node)
-                hint = f"← {src.title if src else conn.src_node}:{conn.src_port}"
-                le = QLabel(hint)
-                le.setStyleSheet(f"color:{FG_DIMMER};")
-                le.setWordWrap(True)
-                rl.addWidget(le, 1)
-            elif not port.editable:
-                le = QLabel("(Connection Required)")
-                le.setStyleSheet(f"color:{FG_DIMMER}; font-style: italic;")
-                rl.addWidget(le, 1)
-            elif port.port_type in (PortType.ENUM, PortType.BOOL):
-                combo = QComboBox()
-                combo.setStyleSheet(NODE_COMBO_STYLE)
+        # Default row: dot + label + widget
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(10, 3, 10, 3)
+        rl.setSpacing(6)
 
-                if port.port_type == PortType.BOOL:
-                    combo.addItem("True", True)
-                    combo.addItem("False", False)
-                    
-                    raw = port.value
-                    is_true = str(raw).lower() in ("true", "1", "yes")
-                    combo.setCurrentIndex(0 if is_true else 1)
-                elif port.enum_options is not None:
-                    for opt in port.enum_options:
-                        combo.addItem(opt, opt)
-                    
-                    raw = port.value
-                    val_str = (
-                        str(raw).lower()
-                        if isinstance(raw, bool)
-                        else (str(raw) if raw is not None else "")
-                    )
-                    idx = combo.findData(val_str)
-                    if idx < 0:
-                        idx = combo.findText(val_str)
-                    if idx >= 0:
-                        combo.setCurrentIndex(idx)
-                else:
-                    if port_uses_graph_variables(port):
-                        _populate_variable_combo(combo, graph)
-                    else:
-                        _populate_asset_combo(combo, port, graph)
+        dot = PortDot(_get_port_color(port.port_type))
+        rl.addWidget(dot, 0, Qt.AlignVCenter)
 
-                    pv = "" if port.value is None else str(port.value)
-                    idx = combo.findData(pv)
-                    if idx < 0 and pv:
-                        norm_val = os.path.normpath(pv).replace("\\", "/")
-                        for i in range(combo.count()):
-                            d = combo.itemData(i)
-                            if d is not None and os.path.normpath(str(d)).replace("\\", "/") == norm_val:
-                                idx = i
-                                break
-                    if idx >= 0:
-                        combo.setCurrentIndex(idx)
-                combo.activated.connect(
-                    lambda _i, p=pname, c=combo: self._on_combo_activated(p, c)
-                )
-                rl.addWidget(combo, 1)
+        lbl = QLabel(port.label or pname)
+        lbl.setStyleSheet(_PORT_LABEL_STYLE)
+        lbl.setWordWrap(True)
+        rl.addWidget(lbl)
+
+        if conn:
+            src = graph.nodes.get(conn.src_node)
+            hint = f"← {src.title if src else conn.src_node}:{conn.src_port}"
+            le = QLabel(hint)
+            le.setStyleSheet(_CONN_HINT_STYLE)
+            le.setWordWrap(True)
+            rl.addWidget(le, 1)
+        elif not port.editable:
+            le = QLabel("(Connection Required)")
+            le.setStyleSheet(_CONN_HINT_STYLE)
+            rl.addWidget(le, 1)
+        else:
+            spec = _get_type_spec(port.port_type)
+            if spec and spec.inspector_widget_factory is not None:
+                w = spec.inspector_widget_factory(port)
+                if w is not None:
+                    rl.addWidget(w, 1)
+                    return row
+            if port.port_type == PortType.BOOL:
+                btn = QPushButton("True" if bool(port.value) else "False")
+                btn.setFixedHeight(20)
+                btn.setMaximumWidth(_MAX_WIDGET_W)
+                btn.setStyleSheet(NODE_BOOL_STYLE)
+                btn.clicked.connect(lambda _=False, p=pname, b=btn: self._on_bool_clicked(p, b))
+                rl.addWidget(btn, 1)
+            elif port.port_type == PortType.ENUM:
+                v = port.value
+                display = str(v) if v is not None else "Select..."
+                text = display[:24] + "…" if len(display) > 25 else display
+                btn = QPushButton(text)
+                btn.setFixedHeight(22)
+                btn.setMaximumWidth(_MAX_WIDGET_W)
+                btn.setStyleSheet(NODE_ENUM_BTN_STYLE)
+                btn.setProperty("widget_type", "enum")
+                btn.clicked.connect(lambda _=False, p=pname, b=btn: self._on_enum_clicked(p, b))
+                rl.addWidget(btn, 1)
             elif port.port_type == PortType.FILE:
                 edit = QLineEdit(str(port.value or ""))
                 edit.setStyleSheet(EDIT_STYLE)
+                edit.setMaximumWidth(_MAX_WIDGET_W)
                 edit.setProperty("port_name", pname)
                 edit.setProperty("original_val", port.value)
                 edit.editingFinished.connect(lambda e=edit: self._on_lineedit_finished(e))
@@ -239,41 +388,36 @@ class SelectedNodePanel(QWidget):
                 val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
                 edit = QLineEdit(val_str)
                 edit.setStyleSheet(EDIT_STYLE)
+                edit.setMaximumWidth(_MAX_WIDGET_W)
                 edit.setProperty("port_name", pname)
                 edit.setProperty("original_val", port.value)
                 edit.editingFinished.connect(lambda e=edit: self._on_lineedit_finished(e))
                 rl.addWidget(edit, 1)
             else:
                 le = QLabel("(Connection Required)")
-                le.setStyleSheet(f"color:{FG_DIMMER}; font-style: italic;")
+                le.setStyleSheet(_CONN_HINT_STYLE)
                 rl.addWidget(le, 1)
 
-            self._rows.insertWidget(insert_at, row)
-            insert_at += 1
+        return row
+
+    # ------------------------------------------------------------------
+    # Slots
+    # ------------------------------------------------------------------
 
     def _on_title_finished(self) -> None:
         if not self._item or not self._title_edit:
             return
         new_t = self._title_edit.text().strip()
-        
-        # Check if anything actually changed
         current_display = self._item.node.display_name
         if new_t == current_display:
             return
-            
-        # If empty, clear custom name to revert to default
         if not new_t:
             self._item.node.custom_name = None
-        # Otherwise, set the custom name
         else:
             self._item.node.custom_name = new_t
-
         self._suppress_refresh = True
         try:
-            # Update the node item display
             self._item.update()
-            
-            # Mark graph as changed
             if self.main_window.scene:
                 self.main_window.scene.graph_changed.emit()
         finally:
@@ -305,7 +449,6 @@ class SelectedNodePanel(QWidget):
             from gui.logger import log
             log.error(f"[{self._item.node.title}] {err}")
             return
-
         self._suppress_refresh = True
         try:
             from gui.node_editor import PropertyCommand
@@ -314,24 +457,64 @@ class SelectedNodePanel(QWidget):
             self._suppress_refresh = False
         edit.setProperty("original_val", new_val)
 
-    def _on_combo_activated(self, pname: str, combo: QComboBox) -> None:
+    def _on_bool_clicked(self, pname: str, btn: QPushButton) -> None:
         if not self._item:
             return
         port = self._item.node.inputs.get(pname)
         if not port:
             return
-        new_val = combo.itemData(combo.currentIndex())
-        if port.value == new_val:
-            return
-
+        old_val = port.value
+        new_val = not bool(old_val)
         self._suppress_refresh = True
         try:
             from gui.node_editor import PropertyCommand
-            self.main_window.scene.undo_stack.push(
-                PropertyCommand(self._item, pname, port.value, new_val)
-            )
+            self.main_window.scene.undo_stack.push(PropertyCommand(self._item, pname, old_val, new_val))
+            btn.setText("True" if new_val else "False")
         finally:
             self._suppress_refresh = False
+
+    def _on_enum_clicked(self, pname: str, btn: QPushButton) -> None:
+        if not self._item:
+            return
+        port = self._item.node.inputs.get(pname)
+        if not port:
+            return
+        graph = self.main_window.scene.graph
+        from gui.menu.file_search_dialog import GenericSelectionDialog, FileSearchDialog
+        mw = self.main_window
+
+        def _commit(new_val) -> None:
+            old_val = port.value
+            if old_val == new_val:
+                return
+            display = str(new_val) if new_val is not None else "Select..."
+            btn.setText(display[:24] + "…" if len(display) > 25 else display)
+            self._suppress_refresh = True
+            try:
+                from gui.node_editor import PropertyCommand
+                self.main_window.scene.undo_stack.push(PropertyCommand(self._item, pname, old_val, new_val))
+            finally:
+                self._suppress_refresh = False
+
+        if port.enum_filter and not port.enum_options:
+            dialog = FileSearchDialog(parent=mw, file_filter=port.enum_filter,
+                                      title=port.label or pname)
+            _position_near_cursor(dialog)
+            if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
+                _commit(dialog.selected_file)
+        else:
+            if port.enum_options is not None:
+                options = port.enum_options
+            elif port_uses_graph_variables(port):
+                options = list((getattr(graph, "variables", {}) or {}).keys())
+            else:
+                assets = getattr(graph, "assets", []) or []
+                ext = port.enum_filter or []
+                options = [a for a in assets if not ext or os.path.splitext(a)[1].lower() in ext]
+            dialog = GenericSelectionDialog(options, parent=mw, title=port.label or pname)
+            _position_near_cursor(dialog)
+            if dialog.exec() == GenericSelectionDialog.Accepted and dialog.selected_item:
+                _commit(dialog.selected_item)
 
     def _browse_file(self, pname: str, edit: QLineEdit) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select File", "", "All Files (*)")
@@ -340,6 +523,7 @@ class SelectedNodePanel(QWidget):
             edit.setProperty("original_val", port.value if port else None)
             edit.setText(path)
             self._on_lineedit_finished(edit)
+
 
 class NodeInspectorModularPanel(BasePanel):
     ID = "NodeInspectorDock"
@@ -352,12 +536,9 @@ class NodeInspectorModularPanel(BasePanel):
         self.setWidget(self._widget)
 
     def setup(self) -> None:
-        """Connect the inspector to the scene's selection and change signals."""
         scene = self.main_window.scene
         if scene:
-            # Update whenever selection changes
             scene.selectionChanged.connect(self._widget.refresh)
-            # Update when the graph structure or values change
             scene.graph_changed.connect(self._widget.refresh)
         self._widget.refresh()
 
@@ -366,8 +547,9 @@ class NodeInspectorModularPanel(BasePanel):
             try:
                 self._active_scene.selectionChanged.disconnect(self._widget.refresh)
                 self._active_scene.graph_changed.disconnect(self._widget.refresh)
-            except (TypeError, RuntimeError): pass
-            
+            except (TypeError, RuntimeError):
+                pass
+
         self._active_scene = scene
         scene.selectionChanged.connect(self._widget.refresh)
         scene.graph_changed.connect(self._widget.refresh)

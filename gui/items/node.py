@@ -8,6 +8,11 @@ from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPa
 from PySide6.QtCore    import Qt, QRectF, QPointF
 
 from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables
+from core.port_type_registry import (
+    get_color as _get_port_color,
+    is_editable as _type_editable,
+    get_port_type_spec as _get_type_spec,
+)
 from gui.theme import *
 from gui.widgets.basic_shapes import ShapeDrawer
 import math as _math
@@ -21,8 +26,8 @@ PAD       = 8    # inner horizontal padding
 MIN_W     = 120
 LABEL_MAXSPACE_GAP = 40
 
-# Input types that get an inline editable widget when unconnected.
-_EDITABLE = {PortType.ANY, PortType.STRING, PortType.INT, PortType.FLOAT, PortType.BOOL, PortType.ENUM, PortType.FILE}
+def _port_is_editable(port_type) -> bool:
+    return _type_editable(port_type)
 
 def _elide(s: str, n: int = 25) -> str:
     return s if len(s) <= n else s[:n - 1] + "…"
@@ -67,7 +72,7 @@ class PortItem(QGraphicsEllipseItem):
         r = PR
         super().__init__(-r, -r, 2 * r, 2 * r, parent=parent)
         self.port = port
-        self._base_color = QColor(PORT_COLORS.get(port.port_type, "#aaaaaa"))
+        self._base_color = QColor(_get_port_color(port.port_type))
         self._apply_color(self._base_color)
         self.setZValue(2)
         self.setAcceptHoverEvents(True)
@@ -116,12 +121,11 @@ class PortItem(QGraphicsEllipseItem):
         When disconnected, they revert to their original base color.
         """
         if source_port_type is not None and self.port.port_type == PortType.ANY:
-            color = QColor(PORT_COLORS.get(source_port_type, "#aaaaaa"))
+            color = QColor(_get_port_color(source_port_type))
             self._base_color = color
             self._apply_color(color)
         else:
-            # Revert to original port type color
-            self._base_color = QColor(PORT_COLORS.get(self.port.port_type, "#aaaaaa"))
+            self._base_color = QColor(_get_port_color(self.port.port_type))
             self._apply_color(self._base_color)
 
 
@@ -292,7 +296,7 @@ class NodeItem(QGraphicsItem):
                 h += ROW_H
         below_extra = 0
         for p in self.node.inputs.values():
-            is_editable = p.port_type in _EDITABLE and p.editable
+            is_editable = _port_is_editable(p.port_type) and p.editable
             has_custom = self.node.has_gui_builder(p.name)
             full_row = getattr(p, 'full_row', False)
             below_flag = getattr(p, 'below_ports', False)
@@ -321,7 +325,7 @@ class NodeItem(QGraphicsItem):
         metrics = QFontMetrics(QFont("Segoe UI", 8))
         max_w = 0
         for name, port in self.node.inputs.items():
-            is_editable = port.port_type in _EDITABLE and port.editable
+            is_editable = _port_is_editable(port.port_type) and port.editable
             has_custom = self.node.has_gui_builder(name)
             full_row = getattr(port, 'full_row', False)
             if not (is_editable or has_custom or full_row or port.allow_connection):
@@ -344,7 +348,7 @@ class NodeItem(QGraphicsItem):
             if p.allow_connection:
                 rows.append(("o", name))
         for name, p in self.node.inputs.items():
-            if (p.port_type in _EDITABLE and p.editable) or self.node.has_gui_builder(name) or getattr(p, 'full_row', False) or p.allow_connection:
+            if (_port_is_editable(p.port_type) and p.editable) or self.node.has_gui_builder(name) or getattr(p, 'full_row', False) or p.allow_connection:
                 rows.append(("i", name))
         return tuple(rows)
 
@@ -394,7 +398,7 @@ class NodeItem(QGraphicsItem):
         below_ports_queue: list[tuple[str, "Port"]] = []
         current_y = TITLE_H + row_idx * ROW_H
         for name, port in self.node.inputs.items():
-            is_editable = port.port_type in _EDITABLE and port.editable
+            is_editable = _port_is_editable(port.port_type) and port.editable
             has_custom = self.node.has_gui_builder(name)
             full_row = getattr(port, 'full_row', False)
             below_flag = getattr(port, 'below_ports', False)
@@ -489,6 +493,9 @@ class NodeItem(QGraphicsItem):
     
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
+        spec = _get_type_spec(port.port_type)
+        if spec and spec.canvas_widget_factory is not None:
+            return spec.canvas_widget_factory(port, parent)
 
         if port.port_type == PortType.BOOL:
             toggle = QPushButton(parent)
@@ -1293,7 +1300,7 @@ class NodeItem(QGraphicsItem):
         lbl_w = self.node.label_width or self._calculate_ideal_label_width()
         row_offset_y = TITLE_H + visible_out_idx * ROW_H
         for name, port in self.node.inputs.items():
-            is_editable = port.port_type in _EDITABLE and port.editable
+            is_editable = _port_is_editable(port.port_type) and port.editable
             has_custom = self.node.has_gui_builder(name)
             full_row = getattr(port, 'full_row', False)
             below_flag = getattr(port, 'below_ports', False)

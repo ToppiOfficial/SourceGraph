@@ -1,0 +1,7 @@
+{
+    "name": "Valve Model QC",
+    "description": "Nodes and types for building Valve .qc model compile scripts, including model, body, animation, and parameter nodes.",
+    "authors": ["toppi"],
+    "tags": ["studiomdl", "model"],
+    "version": "1.0.0"
+}

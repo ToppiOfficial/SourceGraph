@@ -77,16 +77,6 @@ class GraphLoadedEvent(GraphEvent):
 
 
 @dataclass
-class VariablesChangedEvent(GraphEvent):
-    pass
-
-
-@dataclass
-class AssetsChangedEvent(GraphEvent):
-    pass
-
-
-@dataclass
 class NodeExecutedEvent(GraphEvent):
     node_id: str
 

@@ -32,15 +32,12 @@ class Connection:
 
 @dataclass
 class GraphState:
-    assets: list[str] = field(default_factory=list)
-    variables: dict[str, Any] = field(default_factory=dict)
     project_dir: str | None = None
     output_dir: str | None = None
     execution_sessions: list[dict] = field(default_factory=list)
     view_state: dict[str, Any] = field(default_factory=dict)
-    asset_layout: list[dict] | None = None
-    variable_layout: list[dict] | None = None
     time_unit: str = "ms"
+    ext_stores: dict[str, Any] = field(default_factory=dict)
 
 
 class Graph:
@@ -58,24 +55,22 @@ class Graph:
         return self._state
 
     @property
-    def assets(self) -> list[str]: return self._state.assets
-    @assets.setter
-    def assets(self, v): self._state.assets = v
-
-    @property
-    def variables(self) -> dict[str, Any]: return self._state.variables
+    def variables(self) -> dict[str, Any]:
+        return self._state.ext_stores.setdefault("variables", {})
     @variables.setter
-    def variables(self, v): self._state.variables = v
+    def variables(self, v): self._state.ext_stores["variables"] = v
 
     @property
-    def asset_layout(self) -> list[dict] | None: return self._state.asset_layout
-    @asset_layout.setter
-    def asset_layout(self, v): self._state.asset_layout = v
-
-    @property
-    def variable_layout(self) -> list[dict] | None: return self._state.variable_layout
+    def variable_layout(self) -> list[dict] | None:
+        return self._state.ext_stores.get("variable_layout")
     @variable_layout.setter
-    def variable_layout(self, v): self._state.variable_layout = v
+    def variable_layout(self, v): self._state.ext_stores["variable_layout"] = v
+
+    def get_ext_store(self, key: str, default: Any = None) -> Any:
+        return self._state.ext_stores.get(key, default)
+
+    def set_ext_store(self, key: str, value: Any) -> None:
+        self._state.ext_stores[key] = value
 
     @property
     def project_dir(self) -> str | None: return self._state.project_dir
@@ -192,6 +187,7 @@ class Graph:
 
     def to_dict(self) -> dict:
         from core.registry import get_default_registry
+        from core.graph_store_registry import get_all_store_specs
         registry = get_default_registry()
         plugin_deps: set[str] = set()
         for node in self.nodes.values():
@@ -199,18 +195,17 @@ class Graph:
             if src and src.startswith("plugin:"):
                 plugin_deps.add(src[len("plugin:"):])
 
-        return {
+        d = {
             "version":          "1.0",
             "required_plugins": sorted(plugin_deps),
             "nodes":            [n.to_dict() for n in self.nodes.values()],
             "connections":      [c.to_dict() for c in self.connections],
-            "variables":        self.variables,
-            "assets":           self.assets,
             "execution":        self.execution_sessions,
             "view_state":       self.view_state,
-            "asset_layout":     self._state.asset_layout,
-            "variable_layout":  self._state.variable_layout,
         }
+        for spec in get_all_store_specs():
+            d.update(spec.dump(self))
+        return d
 
     def load_dict(self, data: dict, registry: dict | None = None) -> None:
         from gui.logger import log
@@ -225,15 +220,10 @@ class Graph:
         self.nodes.clear()
         self.connections.clear()
 
-        self.variables.clear()
-        vars_data = data.get("variables")
-        if isinstance(vars_data, dict):
-            self.variables.update(vars_data)
-
-        self.assets.clear()
-        assets_data = data.get("assets")
-        if isinstance(assets_data, list):
-            self.assets.extend(assets_data)
+        from core.graph_store_registry import get_all_store_specs
+        self._state.ext_stores.clear()
+        for spec in get_all_store_specs():
+            self._state.ext_stores.update(spec.load(data))
 
         exec_data = data.get("execution", [])
         if isinstance(exec_data, dict):
@@ -244,9 +234,6 @@ class Graph:
         view_data = data.get("view_state", {})
         if isinstance(view_data, dict):
             self.view_state = view_data
-
-        self._state.asset_layout = data.get("asset_layout")
-        self._state.variable_layout = data.get("variable_layout")
 
         for nd in data.get("nodes", []):
             cls = registry.get(nd["type"])

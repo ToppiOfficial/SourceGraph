@@ -1260,56 +1260,8 @@ class NodeEditorView(SafeGraphicsView):
             self.scene().clearSelection()
             current_pos = QPointF(scene_pos)
             for kind, value in items_to_process:
-                if kind == "variable":
-                    # Variable Node Logic
-                    cls_name = "VariableInNode" if (event.modifiers() & Qt.AltModifier) else "VariableOutNode"
-                    cls = NODE_CLASS_MAPPINGS.get(cls_name)
-                    if cls:
-                        node = cls()
-                        node.graph = self.scene().graph
-                        for pname, port in node.inputs.items():
-                            if port_uses_graph_variables(port):
-                                port.value = value
-                                break
-                        if hasattr(node, "on_property_changed"):
-                            node.on_property_changed()
-                        self.scene().add_node(node, current_pos)
-                        
-                        # Auto-select for easier multi-drag/delete
-                        item = self.scene()._node_items.get(node.id)
-                        if item:
-                            item.setSelected(True)
-                else:
-                    # Asset Node Logic
-                    ext = os.path.splitext(value)[1].lower()
-                    if ext in (".srcsubgraph", ".srcgraph"):
-                        cls = NODE_CLASS_MAPPINGS.get("SubgraphNode")
-                        assign_key = "graph_path"
-                    else:
-                        cls = NODE_CLASS_MAPPINGS.get("FileLoader")
-                        assign_key = "asset"
-
-                    if cls:
-                        node = cls()
-                        node.graph = self.scene().graph
-                        node.title = os.path.basename(value)
-                        if assign_key and assign_key in node.inputs:
-                            node.inputs[assign_key].value = value
-                        else:
-                            for key in ("asset", "path", "file"):
-                                if key in node.inputs:
-                                    node.inputs[key].value = value
-                                    break
-                        if hasattr(node, "on_property_changed"):
-                            node.on_property_changed()
-                        self.scene().add_node(node, current_pos)
-                        
-                        # Auto-select for easier multi-drag/delete
-                        item = self.scene()._node_items.get(node.id)
-                        if item:
-                            item.setSelected(True)
-                
-                # Increment vertical spacing for the next node
+                from core.drop_registry import dispatch
+                dispatch(kind, self.scene(), current_pos, value, event.modifiers())
                 current_pos += QPointF(0, 120)
 
         event.acceptProposedAction()

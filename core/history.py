@@ -20,35 +20,31 @@ class StateSnapshot:
     """Immutable capture of graph state used as the before/after in a command."""
     nodes:       dict[str, dict] = field(default_factory=dict)
     connections: list[dict]      = field(default_factory=list)
-    variables:   dict[str, Any]  = field(default_factory=dict)
-    assets:      list[str]       = field(default_factory=list)
     execution:   list[dict]      = field(default_factory=list)
-    asset_layout: list[dict] | None = None
-    variable_layout: list[dict] | None = None
+    ext_stores:  dict[str, Any]  = field(default_factory=dict)
 
     @classmethod
     def capture(cls, graph: Graph, external: dict | None = None) -> StateSnapshot:
+        from core.graph_store_registry import get_all_store_specs
         ext = external or {}
+        stores: dict[str, Any] = {}
+        for spec in get_all_store_specs():
+            stores.update(spec.dump(graph))
         return cls(
             nodes       = {nid: n.to_dict() for nid, n in graph.nodes.items()},
             connections = [c.to_dict() for c in graph.connections],
-            variables   = copy.deepcopy(graph.variables),
-            assets      = list(graph.assets),
             execution   = copy.deepcopy(ext.get("execution", [])),
-            asset_layout = copy.deepcopy(graph.asset_layout) if graph.asset_layout is not None else None,
-            variable_layout = copy.deepcopy(graph.variable_layout) if graph.variable_layout is not None else None,
+            ext_stores  = copy.deepcopy(stores),
         )
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "nodes":       self.nodes,
             "connections": self.connections,
-            "variables":   self.variables,
-            "assets":      self.assets,
             "execution":   self.execution,
-            "asset_layout": self.asset_layout,
-            "variable_layout": self.variable_layout,
         }
+        d.update(self.ext_stores)
+        return d
 
 
 class HistoryCommand(QUndoCommand):
@@ -119,13 +115,7 @@ class HistoryCommand(QUndoCommand):
             for cd in snapshot.connections:
                 self.graph.connections.append(Connection.from_dict(cd))
 
-            self.graph.variables.clear()
-            self.graph.variables.update(copy.deepcopy(snapshot.variables))
-            self.graph.assets.clear()
-            self.graph.assets.extend(snapshot.assets)
-
-            self.graph.asset_layout = copy.deepcopy(snapshot.asset_layout)
-            self.graph.variable_layout = copy.deepcopy(snapshot.variable_layout)
+            self.graph._state.ext_stores = copy.deepcopy(snapshot.ext_stores)
 
             for node in self.graph.nodes.values():
                 node.sync_dynamic_ports()

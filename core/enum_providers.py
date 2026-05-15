@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -46,34 +45,4 @@ class VariablesEnumProvider(EnumProvider):
         port.value = next(iter(vars_dict)) if len(vars_dict) == 1 else ""
 
 
-class AssetsEnumProvider(EnumProvider):
-    def resolve(self, graph: "Graph", port: "Port") -> None:
-        assets = getattr(graph, "assets", None) or []
-        if not assets:
-            return
-        ext_filter = port.enum_filter
-        valid: list[str] = []
-        for a in assets:
-            if ext_filter and os.path.splitext(a)[1].lower() not in ext_filter:
-                continue
-            valid.append(os.path.normpath(str(a)).replace("\\", "/"))
-
-        pv_raw = "" if port.value is None else str(port.value)
-        if not pv_raw:
-            return
-        pv = os.path.normpath(pv_raw).replace("\\", "/")
-        if pv in valid:
-            port.value = pv
-            return
-        base = os.path.basename(pv)
-        matches = [a for a in valid if os.path.basename(a) == base]
-        if len(matches) == 1:
-            port.value = matches[0]
-        elif len(valid) == 1:
-            port.value = valid[0]
-        else:
-            port.value = ""
-
-
 register_enum_provider("variables", VariablesEnumProvider())
-register_enum_provider("assets", AssetsEnumProvider())

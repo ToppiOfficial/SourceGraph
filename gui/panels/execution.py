@@ -20,14 +20,6 @@ from core.execution import (
 from gui.logger import log
 from PySide6.QtGui import QColor
 from gui.theme import *
-from gui.theme import (
-    EXEC_ITEM_CHECKBOX_STYLE,
-    EXEC_ITEM_TEXT_LABEL_STYLE,
-    EXEC_ITEM_ORDER_LABEL_STYLE,
-    EXEC_LIST_WIDGET_STYLE,
-    SESSION_RENAME_EDIT_STYLE,
-    SESSION_RENAME_EDIT_ERROR_STYLE
-)
 
 
 class ExecutionItemWidget(QWidget):
@@ -924,7 +916,11 @@ class ExecutionPanel(QWidget):
             return
 
         start_total = time.perf_counter()
-        original_vars = copy.deepcopy(self.graph.variables)
+        from core.graph_store_registry import get_volatile_store_specs
+        volatile_backup: dict[str, Any] = {}
+        for spec in get_volatile_store_specs():
+            volatile_backup.update(spec.dump(self.graph))
+        volatile_backup = copy.deepcopy(volatile_backup)
         any_failed = False
 
         try:
@@ -1017,8 +1013,7 @@ class ExecutionPanel(QWidget):
             if self._scene and self._scene.views():
                 self._scene.views()[0].show_notification(f"Execution Error: {e}", is_error=True)
         finally:
-            self.graph.variables.clear()
-            self.graph.variables.update(original_vars)
+            self.graph._state.ext_stores.update(volatile_backup)
             self.refresh()
             for failed_id in self._failed_session_items:
                 self._highlight_failed_item(failed_id)

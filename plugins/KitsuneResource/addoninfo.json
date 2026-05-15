@@ -1,0 +1,7 @@
+{
+    "name": "Asset Tree",
+    "description": "Post-Processing DMX function from KitsuneResource for Studiomdl models",
+    "authors": ["toppi"],
+    "tags": ["assets", "studiomdl"],
+    "version": "1.0.0"
+}

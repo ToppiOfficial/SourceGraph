@@ -115,7 +115,7 @@ class _AssetSearchBase(QDialog):
     def _refresh_list(self): pass
     def _refresh_preview(self): pass
 
-    # ── preview helpers ───────────────────────────────────────────────────────
+    # -- preview helpers -------------------------------------------------------
 
     def _clear_preview(self):
         while self.preview_layout.count():
@@ -161,7 +161,7 @@ class _AssetSearchBase(QDialog):
             lbl.setStyleSheet(f"color: {FG_MAIN}; font-size: 11px;")
             self.preview_layout.addWidget(lbl)
 
-    # ── shared list helpers ───────────────────────────────────────────────────
+    # -- shared list helpers ---------------------------------------------------
 
     def _filter_text(self, paths: list[str], text: str) -> list[str]:
         if not text:
@@ -211,7 +211,7 @@ class _AssetSearchBase(QDialog):
         self.item_list.addItem(item)
         self.item_list.setItemWidget(item, w)
 
-    # ── navigation ────────────────────────────────────────────────────────────
+    # -- navigation ------------------------------------------------------------
 
     def _on_enter(self):
         item = self.item_list.currentItem()
@@ -242,7 +242,7 @@ class _AssetSearchBase(QDialog):
             self.move(x, y)
 
 
-# ── FileSearchDialog ──────────────────────────────────────────────────────────
+# -- FileSearchDialog ----------------------------------------------------------
 
 class FileSearchDialog(_AssetSearchBase):
     def __init__(self, parent=None, file_filter=None, title="Select File"):
@@ -348,7 +348,7 @@ class FileSearchDialog(_AssetSearchBase):
         self.preview_layout.addStretch()
 
 
-# ── SubgraphSearchDialog ──────────────────────────────────────────────────────
+# -- SubgraphSearchDialog ------------------------------------------------------
 
 class SubgraphSearchDialog(_AssetSearchBase):
     def __init__(self, parent=None):
@@ -457,7 +457,7 @@ class SubgraphSearchDialog(_AssetSearchBase):
         self.preview_layout.addStretch()
 
 
-# ── SessionSearchDialog ───────────────────────────────────────────────────────
+# -- SessionSearchDialog -------------------------------------------------------
 
 class GenericSelectionDialog(QDialog):
     """Generic search dialog for selecting from a list of strings."""

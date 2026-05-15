@@ -7,7 +7,7 @@ class StringNode(BaseNode):
     CATEGORY = "Primitives"
     color = "#4ec9b0"
 
-    value = OptIn("STRING", default="", allow_connection=False)
+    value = OptIn("STRING", default="", allow_connection=False, editable=True, full_row=True)
     out   = Out("STRING")
 
     def execute(self, value="", **kwargs):
