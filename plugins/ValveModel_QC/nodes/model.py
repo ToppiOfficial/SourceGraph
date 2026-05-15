@@ -1,14 +1,11 @@
 from __future__ import annotations
-from core.node import (
-    BaseNode, In, DynIn, Out,
-)
-from nodes.studiomdl.shared import QC_CATEGORY, MODEL_PARAMETER_CATEGORY
+from core.node import BaseNode, In, DynIn, Out
 
 
 class ModelNode(BaseNode):
     """Generates $model QC command."""
     title = "Model"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#2a5a3a"
 
     name      = In("STRING", default="studio")
@@ -27,7 +24,7 @@ class ModelNode(BaseNode):
 class EyeballNode(BaseNode):
     """Generates eyeball parameter for $model."""
     title = "Eyeball"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name          = In("STRING", default="eye")
     bone          = In("STRING", default="head")
@@ -48,7 +45,7 @@ class EyeballNode(BaseNode):
 class EyelidNode(BaseNode):
     """Generates eyelid parameter for $model (VTA/SMD style)."""
     title = "Eyelid"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name           = In("STRING", default="upper_right")
     vta_file       = In("FILE", enum_filter=[".vta"],  editable=False)
@@ -75,7 +72,7 @@ class EyelidNode(BaseNode):
 class DMXEyelidNode(BaseNode):
     """Generates dmxeyelid parameter for $model (DMX style)."""
     title = "DMX Eyelid"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     lid           = In("ENUM", enum_options=["upper", "lower"])
     dmx_file      = In("FILE", enum_filter=[".dmx"], editable=False)
@@ -103,7 +100,7 @@ class DMXEyelidNode(BaseNode):
 class MouthNode(BaseNode):
     """Generates mouth parameter for $model."""
     title = "Mouth"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name       = In("STRING", default="mouth")
     attachment = In("STRING", default="mouth")
@@ -120,7 +117,7 @@ class MouthNode(BaseNode):
 class FlexControllerNode(BaseNode):
     """Generates flexcontroller parameter for $model."""
     title = "Flex Controller"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name      = In("STRING", default="flex")
     flex_name = In("STRING", default="flex_target")
@@ -135,7 +132,7 @@ class FlexControllerNode(BaseNode):
 class FlexRuleNode(BaseNode):
     """Generates flexrule block for $model."""
     title = "Flex Rule"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name       = In("STRING", default="rule_name")
     expression = In("STRING", default="flex_a * flex_b")
@@ -151,7 +148,7 @@ class FlexRuleNode(BaseNode):
 class FlexFileNode(BaseNode):
     """Generates flexfile parameter for $model (VTA morph targets)."""
     title = "Flex File"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     vta_file = In("FILE", enum_filter=[".vta"])
     params   = DynIn("COMMAND", prefix="param")
@@ -168,7 +165,7 @@ class FlexFileNode(BaseNode):
 class DefaultFlexNode(BaseNode):
     """Sets a default value for a flex controller."""
     title = "Default Flex"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     name  = In("STRING", default="flex_name")
     value = In("FLOAT", default=1.0)
@@ -181,7 +178,7 @@ class DefaultFlexNode(BaseNode):
 class LocalVarNode(BaseNode):
     """Defines local variables for flex rules."""
     title = "Local Var"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     names = In("STRING", default="var1 var2")
     param = Out("QC_COMMAND")
@@ -193,7 +190,7 @@ class LocalVarNode(BaseNode):
 class FlagNode(BaseNode):
     """Generates simple flags for $model."""
     title = "Model Flag"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     flag  = In("ENUM", enum_options=["blank", "noninteract", "hidden", "no_flex_values", "noautodmxrules"],
                     allow_connection=False, full_row=True)
@@ -206,7 +203,7 @@ class FlagNode(BaseNode):
 class SphereNode(BaseNode):
     """Generates sphere parameter for $model."""
     title = "Sphere"
-    CATEGORY = MODEL_PARAMETER_CATEGORY
+    CATEGORY = "QC Model Parameter"
 
     x      = In("FLOAT", default=0.0)
     y      = In("FLOAT", default=0.0)

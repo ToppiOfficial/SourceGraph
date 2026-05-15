@@ -347,9 +347,32 @@ class ExecutionSession:
         return self.node_names.get(node_id, "")
 
 
+class _SessionItemsProvider:
+    """Validates and fixes ports bound to graph execution sessions."""
+
+    def resolve(self, graph, port) -> None:
+        exec_data = getattr(graph, "execution_sessions", [])
+        if not exec_data:
+            return
+        sessions_list = exec_data.get("sessions", []) if isinstance(exec_data, dict) else exec_data
+        pv = str(port.value) if port.value else ""
+        if not pv or "|" not in pv:
+            return
+        parts = pv.split("|", 1)
+        if len(parts) < 2:
+            return
+        s_name, node_id = parts
+        for s_data in sessions_list:
+            if s_data.get("name") == s_name and node_id in s_data.get("node_ids", []):
+                return
+        matches = [s_data.get("name") for s_data in sessions_list
+                   if node_id in s_data.get("node_ids", [])]
+        port.value = f"{matches[0]}|{node_id}" if len(matches) == 1 else ""
+
+
 class ExecutionPanel(QWidget):
     """Panel for managing execution sessions."""
-    
+
     execution_started = Signal(str)  # session_name
     execution_finished = Signal(str, dict)  # session_name, results
     
@@ -367,7 +390,9 @@ class ExecutionPanel(QWidget):
         self._session_rename_original_name: str | None = None
 
         self._setup_ui()
-        
+        from core.enum_providers import register_enum_provider
+        register_enum_provider("session_items", _SessionItemsProvider())
+
     def keyPressEvent(self, event):
         """Handle key press events, particularly Escape to close context menus."""
         if event.key() == Qt.Key_Escape:

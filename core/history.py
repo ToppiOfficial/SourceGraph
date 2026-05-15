@@ -12,6 +12,8 @@ from PySide6.QtGui  import QUndoCommand, QUndoStack
 if TYPE_CHECKING:
     from .graph import Graph
     from .node import BaseNode
+    from .commands import Command
+
 
 @dataclass
 class StateSnapshot:
@@ -121,7 +123,7 @@ class HistoryCommand(QUndoCommand):
             self.graph.variables.update(copy.deepcopy(snapshot.variables))
             self.graph.assets.clear()
             self.graph.assets.extend(snapshot.assets)
-            
+
             self.graph.asset_layout = copy.deepcopy(snapshot.asset_layout)
             self.graph.variable_layout = copy.deepcopy(snapshot.variable_layout)
 
@@ -136,11 +138,11 @@ class HistoryCommand(QUndoCommand):
                     scene.set_external_state({
                         "execution": snapshot.execution
                     })
-                
+
                 if scene and hasattr(scene, "_rebuild_from_graph"):
                     scene._rebuild_from_graph(selected)
-                
-                # Optimization: snapshot IS the new state, no need to re-capture.
+
+                # Snapshot IS the new committed state — no re-capture needed.
                 mgr._committed = snapshot
 
         finally:
@@ -148,10 +150,88 @@ class HistoryCommand(QUndoCommand):
                 mgr._restoring = False
 
 
-class HistoryManager:
-    """Generalized history manager."""
+class _QCommandWrapper(QUndoCommand):
+    """Wraps a core Command for the Qt undo stack.
 
-    DEBOUNCE_MS = 600   # ms of silence before committing a property-change burst
+    Skips the first redo() call because the command was already executed at
+    push time. On subsequent redo/undo calls it re-executes/reverts.
+    """
+
+    def __init__(self, cmd: "Command", mgr: "HistoryManager") -> None:
+        super().__init__(cmd.description)
+        self._cmd  = cmd
+        self._mgr  = weakref.ref(mgr) if mgr else None
+        self._first = True
+
+    def redo(self) -> None:
+        if self._first:
+            self._first = False
+            return
+        mgr = self._mgr() if self._mgr else None
+        if mgr:
+            mgr._restoring = True
+        try:
+            self._cmd.execute()
+        finally:
+            if mgr:
+                mgr._restoring = False
+        if mgr:
+            mgr._committed = StateSnapshot.capture(mgr.graph, mgr._get_ext())
+
+    def undo(self) -> None:
+        self._first = False
+        mgr = self._mgr() if self._mgr else None
+        if mgr:
+            mgr._restoring = True
+        try:
+            self._cmd.undo()
+        finally:
+            if mgr:
+                mgr._restoring = False
+        if mgr:
+            mgr._committed = StateSnapshot.capture(mgr.graph, mgr._get_ext())
+
+
+class CommandStack:
+    """Executes Commands and records them on the Qt undo stack."""
+
+    def __init__(self, qt_stack: QUndoStack, mgr: "HistoryManager") -> None:
+        self._qt_stack = qt_stack
+        self._mgr = mgr
+        # Non-None while a transaction is collecting commands.
+        self._current_batch: list | None = None
+
+    def push(self, cmd: "Command") -> None:
+        """Execute cmd and record it for undo (unless skipping or batching)."""
+        cmd.execute()
+        if self._mgr.is_skipping():
+            return
+        if self._current_batch is not None:
+            self._current_batch.append(cmd)
+            return
+        self._push_wrapper(_QCommandWrapper(cmd, self._mgr))
+
+    def _push_wrapper(self, wrapper: QUndoCommand) -> None:
+        """Push a wrapper to the Qt stack with proper restoring guards."""
+        self._mgr._debounce.stop()
+        self._mgr._restoring = True
+        try:
+            self._qt_stack.push(wrapper)
+        finally:
+            self._mgr._restoring = False
+        self._mgr._committed = StateSnapshot.capture(
+            self._mgr.graph, self._mgr._get_ext()
+        )
+
+    def clear(self) -> None:
+        self._qt_stack.clear()
+        self._current_batch = None
+
+
+class HistoryManager:
+    """Hybrid history manager: delta Commands + snapshot fallback."""
+
+    DEBOUNCE_MS = 600
 
     def __init__(self, graph: Graph, stack: QUndoStack | None = None) -> None:
         self.graph         = graph
@@ -168,22 +248,22 @@ class HistoryManager:
         self._debounce = QTimer()
         self._debounce.setSingleShot(True)
         self._debounce.timeout.connect(self._auto_commit)
-        
+
+        self._cmd_stack = CommandStack(self.stack, self)
+
         if hasattr(graph, "on_changed"):
             graph.on_changed.append(self._on_change)
             self._committed = StateSnapshot.capture(graph, self._get_ext())
 
     def attach(self, scene) -> None:
         """Connect to a NodeEditorScene after it is created."""
-        # Disconnect from graph to avoid double notifications when scene is present
         if self._on_change in self.graph.on_changed:
             self.graph.on_changed.remove(self._on_change)
-            
         scene.graph_changed.connect(self._on_change)
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
     def register_undo(self, description: str, func: Callable) -> Callable:
-        """Wraps a function so its execution is captured as a named undo entry."""
+        """Wrap a function so its execution is a named undo entry."""
         def wrapper(*args, **kwargs):
             with self.transaction(description):
                 return func(*args, **kwargs)
@@ -211,7 +291,7 @@ class HistoryManager:
         self._auto_commit()
 
     def push(self, cmd: QUndoCommand) -> None:
-        """Directly push a custom QUndoCommand (backward compatibility)."""
+        """Directly push a raw QUndoCommand (backward compatibility)."""
         if self._skip_counter > 0:
             return
         self._debounce.stop()
@@ -223,18 +303,14 @@ class HistoryManager:
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
     def sync(self) -> None:
-        """Re-sync committed baseline after a non-managed QUndoCommand completes.
-
-        Call this at the end of undo() and redo() on commands that are pushed
-        directly to undo_stack rather than through HistoryManager.push().
-        """
+        """Re-sync committed baseline after a non-managed QUndoCommand completes."""
         if self._restoring:
             return
         self._debounce.stop()
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
     def clear(self) -> None:
-        self.stack.clear()
+        self._cmd_stack.clear()
         self._committed = StateSnapshot.capture(self.graph, self._get_ext())
 
     def set_undo_limit(self, limit: int) -> None:
@@ -260,18 +336,30 @@ class HistoryManager:
 
     @contextmanager
     def transaction(self, name: str = "Change"):
-        """Group mutations into a single named undo entry."""
+        """Group mutations into one undo entry (Commands if pushed, else snapshot diff)."""
         self._debounce.stop()
         before = self._committed if self._transaction_depth == 0 else None
         self._transaction_depth += 1
+        outer = self._transaction_depth == 1
+        if outer:
+            self._cmd_stack._current_batch = []
         try:
             yield
         finally:
             self._transaction_depth -= 1
-            if self._transaction_depth == 0 and before is not None:
-                after = StateSnapshot.capture(self.graph, self._get_ext())
-                if after != before:
-                    self._push_snapshot(before, after, name)
+            if outer:
+                batch = self._cmd_stack._current_batch
+                self._cmd_stack._current_batch = None
+
+                if batch:
+                    from core.commands import CompositeCommand
+                    composite = CompositeCommand(batch, name)
+                    wrapper = _QCommandWrapper(composite, self)
+                    self._cmd_stack._push_wrapper(wrapper)
+                elif before is not None:
+                    after = StateSnapshot.capture(self.graph, self._get_ext())
+                    if after != before:
+                        self._push_snapshot(before, after, name)
 
     def _on_change(self) -> None:
         """Slot wired to scene.graph_changed by attach()."""
@@ -308,8 +396,6 @@ class HistoryManager:
             self.stack.push(cmd)
         finally:
             self._restoring = False
-        
-        # Optimization: 'after' already represents the state we just committed.
         self._committed = after
 
 

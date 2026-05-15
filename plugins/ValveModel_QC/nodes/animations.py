@@ -1,12 +1,12 @@
 from __future__ import annotations
 import os
 from core.node import BaseNode, In, Out
-from nodes.studiomdl.shared import ANIMATION_CATEGORY
+
 
 class SequenceNode(BaseNode):
     """Generates $sequence QC command."""
     title = "Sequence"
-    CATEGORY = ANIMATION_CATEGORY
+    CATEGORY = "QC Animation"
     color = "#2a5a3a"
 
     name = In("STRING", default="animation")

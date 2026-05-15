@@ -24,16 +24,17 @@ class ExecutionContext:
     target: ExecutionTarget = ExecutionTarget.JSON
     output_dir: str | None = None
     project_dir: str | None = None
-    
+    restore_port_values: bool = True
+
     on_node_start: Callable[[str, str], None] | None = None
     on_node_complete: Callable[[str, Any], None] | None = None
     on_node_error: Callable[[str, str], None] | None = None
-    
+
     config: dict[str, Any] = field(default_factory=dict)
-    
+
     def is_preview(self) -> bool:
         return self.mode == ExecutionMode.PREVIEW
-    
+
     def should_write_files(self) -> bool:
         return self.mode == ExecutionMode.EXPORT and not self.is_preview()
 
@@ -163,10 +164,11 @@ class StandardExecutionEngine:
             return result_obj
 
         finally:
-            for k, v in original_input_values.items():
-                node.inputs[k].value = v
-            for k, v in original_output_values.items():
-                node.outputs[k].value = v
+            if context.restore_port_values:
+                for k, v in original_input_values.items():
+                    node.inputs[k].value = v
+                for k, v in original_output_values.items():
+                    node.outputs[k].value = v
                 
     def execute(self, graph: Any, context: ExecutionContext) -> dict[str, ExecutionResult]:
         results: dict[str, ExecutionResult] = {}

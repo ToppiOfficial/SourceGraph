@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import math
 import json
+import weakref
 import numpy as np
 import uuid
 
@@ -19,6 +20,15 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from core.graph import Graph, Connection
 from core.node import PortType, port_uses_graph_variables
 from core.history import create_history_manager, HistoryManager
+from core.events import (
+    NodeAddedEvent, NodeRemovedEvent,
+    ConnectionAddedEvent, ConnectionRemovedEvent,
+    GraphLoadedEvent,
+)
+from core.commands import (
+    AddNodeCommand, RemoveNodeCommand, ConnectCommand,
+    DisconnectCommand, MoveNodesCommand,
+)
 from core.recent_nodes import add_recent_node
 from gui.widgets.icon_provider import load_pixmap
 from gui.widgets.safe_graphics_view import SafeGraphicsView
@@ -254,9 +264,9 @@ class NodeEditorScene(QGraphicsScene):
         self.undo_stack = self._undo_manager.undo_stack
         self.undo_stack.setUndoLimit(1536)
 
-        import weakref
         self.graph._scene_ref = weakref.ref(self)
 
+        self._suppress_bus: bool                                      = False
         self._drag_start_states: dict                                 = {}
         self._node_items:  dict[str, NodeItem]                        = {}
         self._conn_items:  list[tuple[Connection, ConnectionItem]]    = []
@@ -267,6 +277,8 @@ class NodeEditorScene(QGraphicsScene):
         self._moving_conn: tuple[Connection, ConnectionItem] | None   = None
         self._flushing:    bool                                       = False
         self.setSceneRect(-4000, -4000, 8000, 8000)
+
+        self._subscribe_to_bus()
 
     #  node management 
 
@@ -329,22 +341,95 @@ class NodeEditorScene(QGraphicsScene):
         finally:
             self._flushing = False
 
+    def _subscribe_to_bus(self) -> None:
+        bus = self.graph.bus
+        bus.subscribe(NodeAddedEvent, self._on_node_added)
+        bus.subscribe(NodeRemovedEvent, self._on_node_removed)
+        bus.subscribe(ConnectionAddedEvent, self._on_connection_added)
+        bus.subscribe(ConnectionRemovedEvent, self._on_connection_removed)
+        bus.subscribe(GraphLoadedEvent, self._on_graph_loaded)
+
+    def _on_node_added(self, e: NodeAddedEvent) -> None:
+        if self._suppress_bus or e.node_id in self._node_items:
+            return
+        node = self.graph.nodes.get(e.node_id)
+        if node is None:
+            return
+        item = NodeItem(node)
+        self._node_items[e.node_id] = item
+        self.addItem(item)
+        self._after_node_mutation(e.node_id)
+        self._flush_updates()
+        self.graph_changed.emit()
+
+    def _on_node_removed(self, e: NodeRemovedEvent) -> None:
+        if self._suppress_bus:
+            return
+        stale = [(c, ci) for c, ci in self._conn_items
+                 if c.src_node == e.node_id or c.dst_node == e.node_id]
+        for c, ci in stale:
+            try:
+                self.removeItem(ci)
+            except RuntimeError:
+                pass
+            self._conn_items.remove((c, ci))
+        item = self._node_items.pop(e.node_id, None)
+        if item is not None:
+            try:
+                self.removeItem(item)
+            except RuntimeError:
+                pass
+        self.graph_changed.emit()
+
+    def _on_connection_added(self, e: ConnectionAddedEvent) -> None:
+        if self._suppress_bus:
+            return
+        self._cleanup_ghost_connections()
+        conn = self.graph.get_input_connection(e.dst_node, e.dst_port)
+        if conn:
+            self._materialise_conn(conn)
+        self.graph_changed.emit()
+
+    def _on_connection_removed(self, e: ConnectionRemovedEvent) -> None:
+        if self._suppress_bus:
+            return
+        key = (e.src_node, e.src_port, e.dst_node, e.dst_port)
+        for pair in list(self._conn_items):
+            c, ci = pair
+            if (c.src_node, c.src_port, c.dst_node, c.dst_port) == key:
+                try:
+                    self.removeItem(ci)
+                except RuntimeError:
+                    pass
+                self._conn_items.remove(pair)
+                break
+        self.graph_changed.emit()
+
+    def _on_graph_loaded(self, e: GraphLoadedEvent) -> None:
+        # load_from_graph() handles visual rebuild explicitly; no action needed here.
+        pass
+
+    def _cleanup_ghost_connections(self) -> None:
+        """Remove visual connection items whose backing Connection is no longer live."""
+        live_keys = {(c.src_node, c.src_port, c.dst_node, c.dst_port)
+                     for c in self.graph.connections}
+        for pair in list(self._conn_items):
+            c_obj, ci = pair
+            if (c_obj.src_node, c_obj.src_port, c_obj.dst_node, c_obj.dst_port) not in live_keys:
+                try:
+                    self.removeItem(ci)
+                except RuntimeError:
+                    pass
+                self._conn_items.remove(pair)
+
     def add_node(self, node, pos: QPointF | None = None) -> None:
-        with self._undo_manager.transaction(f"Add {node.display_name}"):
-            node.graph = self.graph
-            if pos:
-                node.x, node.y = pos.x(), pos.y()
-            node.sync_dynamic_ports()
-            self.graph.add_node(node)
-            item = NodeItem(node)
-            self._node_items[node.id] = item
-            self.addItem(item)
-            
-            # Track recent node usage
-            add_recent_node(type(node))
-            
-            self._after_node_mutation(node.id)
-            self._emit_graph_changed()
+        node.graph = self.graph
+        if pos:
+            node.x, node.y = pos.x(), pos.y()
+        node.sync_dynamic_ports()
+        add_recent_node(type(node))
+        cmd = AddNodeCommand(self.graph, node, weakref.ref(self), self._undo_manager.node_registry)
+        self._undo_manager._cmd_stack.push(cmd)
 
     def on_asset_removed(self, path: str) -> None:
         """Clear any node ports referencing the removed asset and refresh."""
@@ -480,24 +565,24 @@ class NodeEditorScene(QGraphicsScene):
             proxy = SubgraphNode()
             proxy.inputs["graph_path"].value = path
             proxy.on_property_changed()
-            self.graph.add_node(proxy)
-            proxy_node = proxy
-            proxy_node.x, proxy_node.y = avg_pos.x(), avg_pos.y()
-            item = NodeItem(proxy_node)
-            self._node_items[proxy_node.id] = item
-            self.addItem(item)
-            
+            proxy.x, proxy.y = avg_pos.x(), avg_pos.y()
+            self.add_node(proxy)  # pushes AddNodeCommand → _on_node_added creates item
+
             for pname, ext_nid, ext_port in parent_in:
-                self.graph.connect(ext_nid, ext_port, proxy.id, pname)
-                conn = self.graph.get_input_connection(proxy.id, pname)
-                if conn:
-                    self._materialise_conn(conn)
+                existing = self.graph.get_input_connection(proxy.id, pname)
+                cmd = ConnectCommand(
+                    self.graph, ext_nid, ext_port, proxy.id, pname,
+                    existing, weakref.ref(self)
+                )
+                self._undo_manager._cmd_stack.push(cmd)
 
             for pname, ext_nid, ext_port in parent_out:
-                self.graph.connect(proxy.id, pname, ext_nid, ext_port)
-                conn = self.graph.get_input_connection(ext_nid, ext_port)
-                if conn:
-                    self._materialise_conn(conn)
+                existing = self.graph.get_input_connection(ext_nid, ext_port)
+                cmd = ConnectCommand(
+                    self.graph, proxy.id, pname, ext_nid, ext_port,
+                    existing, weakref.ref(self)
+                )
+                self._undo_manager._cmd_stack.push(cmd)
 
             self._flush_updates()
 
@@ -549,41 +634,45 @@ class NodeEditorScene(QGraphicsScene):
             offset = QPointF(32, 32)
             
         if NodeEditorScene._clipboard:
-            with self._undo_manager.transaction("Paste Nodes"):
-                id_map = {}
-                nodes_to_paste = []
-                
-                for n_dict in NodeEditorScene._clipboard.get("nodes", []):
-                    cls = NODE_CLASS_MAPPINGS.get(n_dict["type"])
-                    if not cls: continue
-                    new_dict = n_dict.copy()
-                    old_id = new_dict["id"]
-                    new_id = str(uuid.uuid4())
-                    id_map[old_id] = new_id
-                    new_dict["id"] = new_id
-                    new_dict["x"] += offset.x()
-                    new_dict["y"] += offset.y()
-                    node = cls.from_dict(new_dict)
-                    node.graph = self.graph
-                    nodes_to_paste.append(node)
-                    
-                self.clearSelection()
-                for node in nodes_to_paste:
-                    self.graph.add_node(node)
-                    item = NodeItem(node)
-                    self._node_items[node.id] = item
-                    self.addItem(item)
-                    item.setSelected(True)
-                    self._after_node_mutation(node.id)
+            self._suppress_bus = True
+            try:
+                with self._undo_manager.transaction("Paste Nodes"):
+                    id_map = {}
+                    nodes_to_paste = []
 
-                for c_dict in NodeEditorScene._clipboard.get("connections", []):
-                    sn, dn = id_map.get(c_dict["src_node"]), id_map.get(c_dict["dst_node"])
-                    if sn and dn:
-                        self.graph.connect(sn, c_dict["src_port"], dn, c_dict["dst_port"])
-                        conn = self.graph.get_input_connection(dn, c_dict["dst_port"])
-                        if conn:
-                            self._materialise_conn(conn)
-            
+                    for n_dict in NodeEditorScene._clipboard.get("nodes", []):
+                        cls = NODE_CLASS_MAPPINGS.get(n_dict["type"])
+                        if not cls: continue
+                        new_dict = n_dict.copy()
+                        old_id = new_dict["id"]
+                        new_id = str(uuid.uuid4())
+                        id_map[old_id] = new_id
+                        new_dict["id"] = new_id
+                        new_dict["x"] += offset.x()
+                        new_dict["y"] += offset.y()
+                        node = cls.from_dict(new_dict)
+                        node.graph = self.graph
+                        nodes_to_paste.append(node)
+
+                    self.clearSelection()
+                    for node in nodes_to_paste:
+                        self.graph.add_node(node)
+                        item = NodeItem(node)
+                        self._node_items[node.id] = item
+                        self.addItem(item)
+                        item.setSelected(True)
+                        self._after_node_mutation(node.id)
+
+                    for c_dict in NodeEditorScene._clipboard.get("connections", []):
+                        sn, dn = id_map.get(c_dict["src_node"]), id_map.get(c_dict["dst_node"])
+                        if sn and dn:
+                            self.graph.connect(sn, c_dict["src_port"], dn, c_dict["dst_port"])
+                            conn = self.graph.get_input_connection(dn, c_dict["dst_port"])
+                            if conn:
+                                self._materialise_conn(conn)
+            finally:
+                self._suppress_bus = False
+
             # Force immediate visual update for dynamic ports after paste
             self._flush_updates()
 
@@ -688,94 +777,33 @@ class NodeEditorScene(QGraphicsScene):
         if existing and (existing.src_node, existing.src_port) == (src.port.node_id, src.port.name):
             return
 
-        with self._undo_manager.transaction("Connect Ports"):
-            if existing:
-                # Remove the visual item only — do NOT call _delete_conn() here.
-                # _delete_conn calls graph.disconnect() which triggers sync_dynamic_ports()
-                # and renumbers sibling dynamic ports before graph.connect() has run.
-                # graph.connect() already strips the old connection on dst_port atomically,
-                # so a separate disconnect would cause premature renumbering that then gets
-                # undone (incorrectly) when graph.connect() overwrites the slot.
-                for pair in list(self._conn_items):
-                    if pair[0] == existing:
-                        try:
-                            self.removeItem(pair[1])
-                        except RuntimeError:
-                            pass
-                        self._conn_items.remove(pair)
-                        break
-
-            self.graph.connect(src.port.node_id, src.port.name,
-                               dst.port.node_id, dst.port.name)
-
-            # graph.connect() may trigger sync_dynamic_ports() which replaces Connection
-            # objects in graph.connections with new instances (renumbering). Any _conn_items
-            # entry whose connection is no longer live is a ghost — remove before materialising.
-            live_keys = {(c.src_node, c.src_port, c.dst_node, c.dst_port)
-                         for c in self.graph.connections}
-            for pair in list(self._conn_items):
-                c_obj, ci = pair
-                if (c_obj.src_node, c_obj.src_port, c_obj.dst_node, c_obj.dst_port) not in live_keys:
-                    try:
-                        self.removeItem(ci)
-                    except RuntimeError:
-                        pass
-                    self._conn_items.remove(pair)
-
-            conn = self.graph.get_input_connection(dst.port.node_id, dst.port.name)
-            if conn:
-                self._materialise_conn(conn)
-            
-            # Trigger dynamic port synchronization
-            self._after_node_mutation(src.port.node_id)
-            self._after_node_mutation(dst.port.node_id)
-            
-            # Force immediate visual update for dynamic ports
-            self._flush_updates()
+        cmd = ConnectCommand(
+            self.graph, src.port.node_id, src.port.name,
+            dst.port.node_id, dst.port.name,
+            existing, weakref.ref(self)
+        )
+        self._undo_manager._cmd_stack.push(cmd)
 
     def _delete_node(self, item: NodeItem, push_undo: bool = True) -> None:
-        nid  = item.node.id
-        dead = [(c, ci) for c, ci in self._conn_items
-                if c.src_node == nid or c.dst_node == nid]
-
-        ctx = self._undo_manager.transaction if push_undo else self._undo_manager.skip_undo
-        label = f"Delete {item.node.display_name}" if push_undo else ""
-        with (ctx(label) if push_undo else ctx()):
-            for c, ci in dead:
-                self._delete_conn(ci, push_undo=False)
-
-            self.graph.remove_node(nid)
-            self._node_items.pop(nid, None)
-            self.removeItem(item)
-
-            # sync_dynamic_ports() may have rematerialised ConnectionItems for this node
-            # during the loop above; those are not in `dead` and must be cleaned up now.
-            stale = [(c, ci) for c, ci in self._conn_items
-                     if c.src_node == nid or c.dst_node == nid]
-            for c, ci in stale:
-                try:
-                    self.removeItem(ci)
-                except RuntimeError:
-                    pass
-                self._conn_items.remove((c, ci))
+        nid = item.node.id
+        conn_snapshots = [c.to_dict() for c in self.graph.connections
+                          if c.src_node == nid or c.dst_node == nid]
+        snapshot = self.graph.nodes[nid].to_dict() if nid in self.graph.nodes else {}
+        cmd = RemoveNodeCommand(
+            self.graph, nid, snapshot, conn_snapshots,
+            self._undo_manager.node_registry, weakref.ref(self)
+        )
+        self._undo_manager._cmd_stack.push(cmd)
 
     def _delete_conn(self, ci: ConnectionItem, push_undo: bool = True) -> None:
         for pair in list(self._conn_items):
             conn, item = pair
             if item is ci:
-                ctx = self._undo_manager.transaction if push_undo else self._undo_manager.skip_undo
-                with (ctx("Disconnect") if push_undo else ctx()):
-                    self.graph.disconnect(conn.src_node, conn.src_port,
-                                          conn.dst_node, conn.dst_port)
-                
-                # Remove the visual connection item first
-                self.removeItem(ci)
-                self._conn_items.remove(pair)
-                
-                # Force immediate visual update for dynamic ports after deletion
-                self._after_node_mutation(conn.src_node)
-                self._after_node_mutation(conn.dst_node)
-                self._flush_updates()
+                cmd = DisconnectCommand(
+                    self.graph, conn.src_node, conn.src_port,
+                    conn.dst_node, conn.dst_port, weakref.ref(self)
+                )
+                self._undo_manager._cmd_stack.push(cmd)
                 return
     
     #  mouse events (scene-level) 
@@ -872,15 +900,14 @@ class NodeEditorScene(QGraphicsScene):
             event.ignore()
             return
         if self._drag_start_states:
-            moves = []
+            move_tuples = []
             for nid, start_p in self._drag_start_states.items():
                 item = self._node_items.get(nid)
                 if item and item.pos() != start_p:
-                    moves.append((nid, start_p, item.pos()))
-            if moves:
-                # Flush the node-position diff as a single named undo entry.
-                self._undo_manager.notify_immediate("Move Nodes")
-                self._emit_graph_changed()
+                    move_tuples.append((nid, start_p.x(), start_p.y(), item.x(), item.y()))
+            if move_tuples:
+                cmd = MoveNodesCommand(self.graph, move_tuples, weakref.ref(self))
+                self._undo_manager._cmd_stack.push(cmd)
             self._drag_start_states = {}
         if self._drag_conn and self._drag_port:
             if self._hover_port:

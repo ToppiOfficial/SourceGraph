@@ -1,10 +1,10 @@
 from core.node import BaseNode, In, Out
-from nodes.studiomdl.shared import RENDER_SETTING_CATEGORY
+
 
 class MaxVerts(BaseNode):
     """Generates $maxverts QC command."""
     title = "Max Verts"
-    CATEGORY = RENDER_SETTING_CATEGORY
+    CATEGORY = "QC Render Settings"
     color = "#415a2a"
 
     limit = In("INT", default=65536)
@@ -19,7 +19,7 @@ class MaxVerts(BaseNode):
 class MostlyOpaque(BaseNode):
     """Generates $mostlyopaque QC command."""
     title = "Mostly Opaque"
-    CATEGORY = RENDER_SETTING_CATEGORY
+    CATEGORY = "QC Render Settings"
     color = "#415a2a"
 
     command = Out("QC_COMMAND")
@@ -31,7 +31,7 @@ class MostlyOpaque(BaseNode):
 class Opaque(BaseNode):
     """Generates $opaque QC command."""
     title = "Opaque"
-    CATEGORY = RENDER_SETTING_CATEGORY
+    CATEGORY = "QC Render Settings"
     color = "#415a2a"
 
     command = Out("QC_COMMAND")
@@ -43,7 +43,7 @@ class Opaque(BaseNode):
 class AmbientBoost(BaseNode):
     """Generates $ambientboost QC command."""
     title = "Ambient Boost"
-    CATEGORY = RENDER_SETTING_CATEGORY
+    CATEGORY = "QC Render Settings"
     color = "#415a2a"
 
     command = Out("QC_COMMAND")
@@ -55,7 +55,7 @@ class AmbientBoost(BaseNode):
 class StaticProp(BaseNode):
     """Generates $staticprop QC command."""
     title = "Static Prop"
-    CATEGORY = RENDER_SETTING_CATEGORY
+    CATEGORY = "QC Render Settings"
     color = "#415a2a"
 
     command = Out("QC_COMMAND")

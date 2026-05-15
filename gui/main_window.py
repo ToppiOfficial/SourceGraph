@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self._build_statusbar()
         self._update_status_right()
         self.scene.graph_changed.connect(self._on_changed)
+
+        self._load_plugins()
         
         default_ws = self._get_default_workspace_path()
         self._load_layout(default_ws)
@@ -791,6 +793,15 @@ class MainWindow(QMainWindow):
         if hasattr(self.scene, '_undo_manager'):
             self.scene._undo_manager.set_node_registry(NODE_CLASS_MAPPINGS)
 
+    def _load_plugins(self) -> None:
+        """Discover and load plugins from the plugins/ directory."""
+        from core.plugin_loader import PluginLoader
+        from core.registry import get_default_registry
+        plugins_dir = Path(__file__).parent.parent / "plugins"
+        loaded = PluginLoader(get_default_registry()).discover(plugins_dir)
+        if loaded:
+            log.info(f"Loaded plugins: {', '.join(loaded)}")
+
     def _new(self) -> None:
         if not self._maybe_save(): return
         self._nav_root = None
@@ -1091,6 +1102,9 @@ class MainWindow(QMainWindow):
             self._update_status_right()
             self.statusBar().showMessage(f"Loaded {path}")
 
+            if getattr(new_graph, '_missing_plugins', []):
+                QTimer.singleShot(0, lambda g=new_graph: self._prompt_missing_plugins(g))
+
             missing = [p for p in new_graph.assets if not os.path.exists(p)]
             if missing:
                 for p in missing:
@@ -1098,6 +1112,20 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._prompt_missing_assets)
         except Exception as e:
             log.error(f"Failed to load {path}: {e}")
+
+    def _prompt_missing_plugins(self, graph) -> None:
+        missing = getattr(graph, '_missing_plugins', [])
+        if not missing:
+            return
+        from PySide6.QtWidgets import QMessageBox
+        names = "\n".join(f"  • {p}" for p in missing)
+        QMessageBox.warning(
+            self,
+            "Missing Plugins",
+            f"This project requires plugins that are not installed:\n\n{names}"
+            f"\n\nAffected nodes have been removed from the graph."
+            f"\n\nInstall the required plugins and reload the file.",
+        )
 
     def _prompt_missing_assets(self) -> None:
         assets_widget = self.panel_manager.get_widget("AssetDock")
@@ -1182,7 +1210,7 @@ class MainWindow(QMainWindow):
         import tempfile
         import shutil
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        crash_dir = os.path.join(root_dir, "crash")
+        crash_dir = os.path.join(root_dir, "error")
         os.makedirs(crash_dir, exist_ok=True)
 
         temp_dir = tempfile.gettempdir()
@@ -1240,7 +1268,7 @@ class MainWindow(QMainWindow):
                 # If it's not empty, move it to the crash directory
                 if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    crash_dir = os.path.join(root_dir, "crash")
+                    crash_dir = os.path.join(root_dir, "error")
                     dest = os.path.join(crash_dir, f"fatal_crash_{int(time.time())}.log")
                     import shutil
                     shutil.move(temp_path, dest)

@@ -1,12 +1,11 @@
 from __future__ import annotations
 from core.node import BaseNode, In, DynIn, Out
-from nodes.studiomdl.shared import QC_CATEGORY, MATERIAL_CATEGORY
 
 
 class ModelNameNode(BaseNode):
     """Generates $modelname QC command."""
     title = "Model Name"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#2a5a3a"
 
     model_path = In("STRING", default="models/mymodel/model.mdl", full_row=True)
@@ -19,7 +18,7 @@ class ModelNameNode(BaseNode):
 class CDMaterialsNode(BaseNode):
     """Generates $cdmaterials QC command."""
     title = "CD Materials"
-    CATEGORY = MATERIAL_CATEGORY
+    CATEGORY = "QC Material"
     color = "#2a5a3a"
 
     path    = In("STRING", default="models/mymodel/")
@@ -32,7 +31,7 @@ class CDMaterialsNode(BaseNode):
 class ConcatenateQCcommands(BaseNode):
     """Joins multiple QC commands into one."""
     title = "Concatenate QC commands"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#7a2d2d"
     body_color = "#2b1010"
 

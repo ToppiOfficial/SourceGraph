@@ -10,6 +10,8 @@ from enum import Enum
 if TYPE_CHECKING:
     from .graph import Graph
 
+_SENTINEL = object()  # used as default sentinel in Port.set_value
+
 
 class PortType(str, Enum):
     ANY        = "any"
@@ -71,6 +73,20 @@ class Port:
         if self.port_type == PortType.ANY or other.port_type == PortType.ANY:
             return True
         return self.port_type == other.port_type
+
+    def set_value(self, value: Any, bus=None, old_value: Any = _SENTINEL) -> None:
+        """Set port value and optionally emit a NodePropertyChangedEvent."""
+        if old_value is _SENTINEL:
+            old_value = self.value
+        self.value = value
+        if bus is not None and old_value != value:
+            from core.events import NodePropertyChangedEvent
+            bus.emit(NodePropertyChangedEvent(
+                node_id=self.node_id,
+                port_name=self.name,
+                old_value=old_value,
+                new_value=value,
+            ))
 
 
 def port_uses_graph_variables(port: Port) -> bool:
@@ -419,96 +435,18 @@ class BaseNode:
         pass
 
     def reconcile_graph_bound_inputs(self) -> None:
+        from core.enum_providers import get_enum_provider
         if not self.graph:
             return
         for port in self.inputs.values():
             if port.port_type != PortType.ENUM or port.enum_options is not None:
                 continue
-            
-            if port.graph_enum == "session_items":
-                self._reconcile_sessions_enum(port)
-            elif port_uses_graph_variables(port):
-                self._reconcile_variables_enum(port)
-            else:
-                self._reconcile_assets_enum(port)
-
-    def _reconcile_sessions_enum(self, port: Port) -> None:
-        exec_data = getattr(self.graph, "execution_sessions", [])
-        if not exec_data:
-            return
-        
-        sessions_list = []
-        if isinstance(exec_data, dict):
-            sessions_list = exec_data.get("sessions", [])
-        elif isinstance(exec_data, list):
-            sessions_list = exec_data
-
-        pv = str(port.value) if port.value else ""
-        if not pv or "|" not in pv:
-            return
-
-        parts = pv.split("|", 1)
-        if len(parts) < 2:
-            return
-        s_name, node_id = parts
-        
-        found_session = None
-        for s_data in sessions_list:
-            if s_data.get("name") == s_name:
-                found_session = s_data
-                if node_id in s_data.get("node_ids", []):
-                    return
-                break
-
-        # Not valid in current session. Try to find node_id in ANY session for fuck sake!
-        matches = []
-        for s_data in sessions_list:
-            if node_id in s_data.get("node_ids", []):
-                matches.append(s_data.get("name"))
-        
-        if len(matches) == 1:
-            port.value = f"{matches[0]}|{node_id}"
-        else:
-            port.value = ""
-
-    def _reconcile_variables_enum(self, port: Port) -> None:
-        vars_dict = getattr(self.graph, "variables", None) or {}
-        if not vars_dict:
-            return
-        pv = "" if port.value is None else str(port.value)
-        if not pv or pv in vars_dict:
-            return
-        if len(vars_dict) == 1:
-            port.value = next(iter(vars_dict))
-        else:
-            port.value = ""
-
-    def _reconcile_assets_enum(self, port: Port) -> None:
-        assets = getattr(self.graph, "assets", None) or []
-        if not assets:
-            return
-        ext_filter = port.enum_filter
-        valid: list[str] = []
-        for a in assets:
-            if ext_filter and os.path.splitext(a)[1].lower() not in ext_filter:
-                continue
-            valid.append(os.path.normpath(str(a)).replace("\\", "/"))
-
-        pv_raw = "" if port.value is None else str(port.value)
-        if not pv_raw:
-            return
-        pv = os.path.normpath(pv_raw).replace("\\", "/")
-        if pv in valid:
-            port.value = pv
-            return
-        base = os.path.basename(pv)
-        matches = [a for a in valid if os.path.basename(a) == base]
-        if len(matches) == 1:
-            port.value = matches[0]
-        elif len(valid) == 1:
-            port.value = valid[0]
-        else:
-            port.value = ""
+            key = port.graph_enum
+            if key is None:
+                key = "variables" if port_uses_graph_variables(port) else "assets"
+            provider = get_enum_provider(key)
+            if provider:
+                provider.resolve(self.graph, port)
 
     def fail(self, msg: str) -> None:
         self.error_msg = msg

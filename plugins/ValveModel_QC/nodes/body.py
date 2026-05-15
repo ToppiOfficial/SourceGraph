@@ -1,16 +1,15 @@
 from __future__ import annotations
 from core.node import BaseNode, In, DynIn, Out
-from nodes.studiomdl.shared import RENDERMESH_PARAMETER_CATEGORY, QC_CATEGORY
 
 
 class BodyNode(BaseNode):
     """Generates $body QC command."""
     title = "Body"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#2a5a3a"
 
     name = In("STRING", default="studio")
-    mesh_file = In("FILE")
+    mesh_file = In("FILE", editable=False)
 
     command = Out("QC_COMMAND")
 
@@ -21,7 +20,7 @@ class BodyNode(BaseNode):
 class BodygroupNode(BaseNode):
     """Generates $bodygroup QC block."""
     title = "Bodygroup"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#2a5a3a"
 
     name = In("STRING", default="bodygroup")
@@ -31,7 +30,6 @@ class BodygroupNode(BaseNode):
 
     def execute(self, name: str, **kwargs):
         lines = [f'$bodygroup "{name}"', "{"]
-        # Dynamic inputs are passed via kwargs
         for k, v in kwargs.items():
             if k.startswith("item") and k[4:].isdigit() and v:
                 lines.append(f"    {v}")
@@ -42,7 +40,7 @@ class BodygroupNode(BaseNode):
 class StudioNode(BaseNode):
     """Generates 'studio' sub-command for Bodygroup or LOD blocks."""
     title = "Studio Mesh"
-    CATEGORY = RENDERMESH_PARAMETER_CATEGORY
+    CATEGORY = "QC Mesh Parameter"
     color = "#2a5a3a"
 
     mesh_file = In("FILE", enum_filter=[".dmx", ".smd"], editable=False)
@@ -56,7 +54,7 @@ class StudioNode(BaseNode):
 class BlankNode(BaseNode):
     """Generates 'blank' sub-command for Bodygroup blocks."""
     title = "Blank Mesh"
-    CATEGORY = RENDERMESH_PARAMETER_CATEGORY
+    CATEGORY = "QC Mesh Parameter"
     color = "#2a5a3a"
 
     command = Out("QC_COMMAND")
@@ -68,7 +66,7 @@ class BlankNode(BaseNode):
 class LODNode(BaseNode):
     """Generates $lod QC block."""
     title = "LOD"
-    CATEGORY = QC_CATEGORY
+    CATEGORY = "QC"
     color = "#2a5a3a"
 
     threshold = In("INT", default=10)
@@ -88,7 +86,7 @@ class LODNode(BaseNode):
 class ReplaceModelNode(BaseNode):
     """Generates 'replacemodel' sub-command for LOD blocks."""
     title = "Replace Model"
-    CATEGORY = RENDERMESH_PARAMETER_CATEGORY
+    CATEGORY = "QC Mesh Parameter"
     color = "#2a5a3a"
 
     source_mesh = In("ANY")
@@ -103,7 +101,7 @@ class ReplaceModelNode(BaseNode):
 class ReplaceBoneNode(BaseNode):
     """Generates 'replacebone' sub-command for LOD blocks."""
     title = "Replace Bone"
-    CATEGORY = RENDERMESH_PARAMETER_CATEGORY
+    CATEGORY = "QC Mesh Parameter"
     color = "#2a5a3a"
 
     source_bone = In("STRING", default="bone_src")
@@ -118,7 +116,7 @@ class ReplaceBoneNode(BaseNode):
 class RemoveMeshNode(BaseNode):
     """Generates 'removemesh' sub-command for LOD blocks."""
     title = "Remove Mesh"
-    CATEGORY = RENDERMESH_PARAMETER_CATEGORY
+    CATEGORY = "QC Mesh Parameter"
     color = "#2a5a3a"
 
     mesh_file = In("FILE")
