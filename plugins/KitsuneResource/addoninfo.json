@@ -1,7 +1,9 @@
 {
-    "name": "Asset Tree",
+    "addonid": "kitsune_resource",
+    "name": "Kitsune Resource",
     "description": "Post-Processing DMX function from KitsuneResource for Studiomdl models",
     "authors": ["toppi"],
     "tags": ["assets", "studiomdl"],
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "plugins": []
 }

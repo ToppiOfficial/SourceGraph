@@ -1,11 +1,13 @@
 from __future__ import annotations
 import copy
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 import time
 from enum import Enum, auto
 from collections import defaultdict, deque
 from .node import PortType
+from core.graph_store_registry import get_volatile_store_specs
 
 
 class ExecutionMode(Enum):
@@ -207,7 +209,6 @@ class StandardExecutionEngine:
                 if in_deg[nb] == 0:
                     queue.append(nb)
         
-        from core.graph_store_registry import get_volatile_store_specs
         volatile_backup: dict[str, Any] = {}
         for spec in get_volatile_store_specs():
             volatile_backup.update(spec.dump(graph))
@@ -239,7 +240,6 @@ class StandardExecutionEngine:
                     raise ValueError(f"Invalid boolean: '{value}'")
             return bool(value)
         elif target_type == PortType.DICT:
-            import json
             if isinstance(value, str):
                 return json.loads(value)
             return dict(value)

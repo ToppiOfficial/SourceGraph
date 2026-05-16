@@ -22,10 +22,11 @@ class DriverLookAtBoneNode(BaseNode):
     title    = "Driver Look At Bone"
     CATEGORY = "KitsuneResource"
     color    = "#c678dd"
+    default_width = 265
 
     target_bone  = In("STRING",  label="Target Bone")
     attachment   = OptIn("STRING",  default="",        label="Attachment Name")
-    pose_file    = In("FILE",    label="Pose File", allow_connection=True, editable=False)
+    pose_file    = In("FILE",    label="Pose File", allow_connection=True)
     frame_index  = OptIn("INT",     default=0,         label="Frame Index")
     aim_vector   = OptIn("VECTOR3", default="0 0 1",   label="Aim Vector")
     up_vector    = OptIn("VECTOR3", default="0 1 0",   label="Up Vector")

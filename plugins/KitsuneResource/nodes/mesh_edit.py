@@ -15,7 +15,7 @@ class MeshEditNode(BaseNode):
     color    = "#e06c75"
 
     dmx_file = In("FILE", label="DMX File")
-    mode     = In("ENUM", enum_options=["removemesh", "keeponlymesh"], default="removemesh", label="Mode")
+    mode     = In("ENUM", enum_options=["removemesh", "keeponlymesh"], default="removemesh", label="Mode", allow_connection=False,full_row=True)
     mesh     = DynIn("STRING", prefix="mesh")
 
     file = Out("FILE")

@@ -10,6 +10,8 @@ from __future__ import annotations
 import weakref
 from typing import Any, TYPE_CHECKING
 
+from core.node import PortType, _coerce
+
 if TYPE_CHECKING:
     from core.graph import Graph
 
@@ -275,14 +277,12 @@ class ChangePropertyCommand(Command):
         self.description = f"Change {port_name}"
 
     def _apply(self, val: Any) -> None:
-        from gui.items.node import _coerce
         node = self.graph.nodes.get(self.node_id)
         if node is None:
             return
         port = node.inputs.get(self.port_name)
         if port is None:
             return
-        from core.node import PortType
         if port.port_type == PortType.FLOAT:
             try:
                 val_str = f"{float(val):g}"

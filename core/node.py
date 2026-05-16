@@ -755,3 +755,22 @@ class BaseNode:
         if builder:
             return builder(port)
         return None
+
+
+def _coerce(port, text: str) -> None:
+    """Write a validated string value back into a port, coercing to the port's native type."""
+    try:
+        if port.port_type == PortType.INT:
+            port.value = int(text)
+        elif port.port_type == PortType.FLOAT:
+            port.value = float(text)
+        elif port.port_type == PortType.BOOL:
+            if isinstance(text, bool):
+                port.value = text
+            else:
+                val = str(text).lower().strip()
+                port.value = val in ("true", "1", "yes")
+        else:
+            port.value = text
+    except ValueError:
+        port.value = text

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from core.node import BaseNode, In, OptIn, Out, DynIn
+from gui.widgets.node_widgets import make_text_display
 
 
 class StringNode(BaseNode):
@@ -132,7 +133,6 @@ class PrintNode(BaseNode):
         super()._register_gui_builders()
 
         def create_print_display(port):
-            from gui.widgets.node_widgets import make_text_display
             display = make_text_display()
             self._display_widgets.append(display)
             display.setPlainText(self.output_text)

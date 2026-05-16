@@ -4,12 +4,12 @@ from contextlib import nullcontext
 from typing import Any
 import time
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidget, QListWidgetItem, QLabel, QComboBox,
-    QMenu, QAbstractItemView, QCheckBox, QListWidgetItem, QLineEdit,
-    QDialog, QFormLayout, QDialogButtonBox
+    QMenu, QAbstractItemView, QCheckBox, QLineEdit,
+    QDialog, QFormLayout, QDialogButtonBox, QApplication,
 )
-from PySide6.QtCore import Qt, Signal, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QEvent
 from PySide6.QtGui import QAction, QKeyEvent, QFont, QIcon, QPixmap, QPainter, QColor, QMouseEvent
 
 from gui.panels.base_panel import BasePanel
@@ -17,8 +17,10 @@ from gui.dialogs import RenameDialog
 from core.execution import (
     ExecutionContext, StandardExecutionEngine, ExecutionResult
 )
+from core.enum_providers import register_enum_provider
+from core.graph_store_registry import get_volatile_store_specs
+from gui.items.node import NodeItem
 from gui.logger import log
-from PySide6.QtGui import QColor
 from gui.theme import *
 
 
@@ -150,14 +152,13 @@ class ExecutionListWidget(QListWidget):
             self.closePersistentEditor()
             self.clearSelection()
             # Find and close any open QMenu widgets
-            from PySide6.QtWidgets import QApplication
             for widget in QApplication.topLevelWidgets():
                 if isinstance(widget, QMenu) and widget.isVisible():
                     widget.close()
             event.accept()
             return
         super().keyPressEvent(event)
-    
+
     def dropEvent(self, event):
         """Handle drop event for reordering items."""
         super().dropEvent(event)
@@ -382,25 +383,22 @@ class ExecutionPanel(QWidget):
         self._session_rename_original_name: str | None = None
 
         self._setup_ui()
-        from core.enum_providers import register_enum_provider
         register_enum_provider("session_items", _SessionItemsProvider())
 
     def keyPressEvent(self, event):
         """Handle key press events, particularly Escape to close context menus."""
         if event.key() == Qt.Key_Escape:
             # Close any open context menus
-            from PySide6.QtWidgets import QApplication
             for widget in QApplication.topLevelWidgets():
                 if isinstance(widget, QMenu) and widget.isVisible():
                     widget.close()
             event.accept()
             return
         super().keyPressEvent(event)
-    
+
     def contextMenuEvent(self, event):
         """Override context menu event to prevent duplicate menus."""
         # Check if there's already a menu open
-        from PySide6.QtWidgets import QApplication
         for widget in QApplication.topLevelWidgets():
             if isinstance(widget, QMenu) and widget.isVisible():
                 event.ignore()
@@ -787,8 +785,7 @@ class ExecutionPanel(QWidget):
         mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
         with mgr.transaction("Add to Execution") if mgr else nullcontext():
             if self._scene:
-                from gui.items.node import NodeItem
-                selected = [item for item in self._scene.selectedItems() 
+                selected = [item for item in self._scene.selectedItems()
                            if isinstance(item, NodeItem)]
                 for item in selected:
                     self.current_session.add_node(item.node.id)
@@ -821,13 +818,11 @@ class ExecutionPanel(QWidget):
     def eventFilter(self, obj, event):
         if not self._eyedropper_active:
             return False
-        from PySide6.QtCore import QEvent
         if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
             self._cancel_eyedropper()
             return True
         if event.type() == QEvent.MouseButtonPress:
             if self._scene and self._scene.views():
-                from gui.items.node import NodeItem
                 view = self._scene.views()[0]
                 # items() takes viewport coordinates — event.pos() is in viewport coords
                 hit = next(
@@ -916,7 +911,6 @@ class ExecutionPanel(QWidget):
             return
 
         start_total = time.perf_counter()
-        from core.graph_store_registry import get_volatile_store_specs
         volatile_backup: dict[str, Any] = {}
         for spec in get_volatile_store_specs():
             volatile_backup.update(spec.dump(self.graph))
@@ -1021,7 +1015,6 @@ class ExecutionPanel(QWidget):
             if self._scene:
                 self._scene.update()
             try:
-                from PySide6.QtWidgets import QApplication
                 for w in QApplication.topLevelWidgets():
                     if hasattr(w, 'panel_manager'):
                         gmp = w.panel_manager.get_panel("GraphMapDock")

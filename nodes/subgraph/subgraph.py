@@ -3,9 +3,14 @@ import json
 import os
 from pathlib import Path
 
+from PySide6.QtWidgets import QApplication, QFileDialog
+
 from core.node import BaseNode, Port, PortType, parse_type, In, Out
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
+from core.file_picker_registry import get_file_picker
 from nodes import NODE_CLASS_MAPPINGS
+from gui.widgets.node_widgets import make_file_picker
+from gui.logger import log
 
 
 class SubgraphNode(BaseNode):
@@ -140,22 +145,24 @@ class SubgraphNode(BaseNode):
     def create_widget_for_port(self, port):
         if port.name != "graph_path":
             return None
-        from gui.widgets.node_widgets import make_file_picker
         label_text = os.path.basename(port.value) if port.value else "Select subgraph…"
         container, self._subgraph_label = make_file_picker(label_text, self._show_subgraph_dialog)
         self._graph_path_port = port
         return container
     
     def _show_subgraph_dialog(self):
-        from gui.menu.file_search_dialog import SubgraphSearchDialog
-        from PySide6.QtWidgets import QApplication
         from gui.main_window import MainWindow
-        main_window = next(
-            (w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None
-        )
-        dialog = SubgraphSearchDialog(parent=main_window)
-        if dialog.exec() == SubgraphSearchDialog.Accepted and dialog.selected_file:
-            self._set_graph_path(dialog.selected_file)
+        mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
+        picker = get_file_picker("subgraph")
+        if picker is not None:
+            path = picker(mw, None, "Select Subgraph")
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                mw, "Select Subgraph", "",
+                "Subgraph Files (*.srcsubgraph *.srcgraph);;All Files (*)"
+            )
+        if path:
+            self._set_graph_path(path)
 
     def _set_graph_path(self, path: str) -> None:
         if hasattr(self, '_graph_path_port'):
@@ -220,7 +227,6 @@ class SubgraphNode(BaseNode):
                         outputs[original_pname] = node._captured_value
             return outputs
         except Exception as e:
-            from gui.logger import log
             path_port = self.inputs.get("graph_path")
             name = os.path.basename(path_port.value) if path_port and path_port.value else "subgraph"
             self.error_msg = str(e)

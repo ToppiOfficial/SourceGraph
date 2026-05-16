@@ -68,6 +68,7 @@ class PluginManagerDialog(QDialog):
         defaults: dict = {
             "name": _NAN, "description": _NAN,
             "authors": _NAN, "tags": [], "version": _NAN,
+            "packages": [], "addonid": "", "dependencies": [],
         }
         json_path = plugin_dir / "addoninfo.json"
         if not json_path.exists():
@@ -85,6 +86,12 @@ class PluginManagerDialog(QDialog):
                 return ", ".join(str(v) for v in val) if val else _NAN
             return str(val) or _NAN
 
+        import re as _re
+
+        def _norm_id(raw: str) -> str:
+            s = raw.lower().replace(" ", "_")
+            return _re.sub(r"[^a-z0-9_-]", "", s)
+
         tags = data.get("tags")
         if isinstance(tags, list):
             tag_list = [str(t) for t in tags if t]
@@ -93,12 +100,32 @@ class PluginManagerDialog(QDialog):
         else:
             tag_list = []
 
+        raw_pkgs = data.get("packages")
+        if isinstance(raw_pkgs, list):
+            pkg_list = [str(p) for p in raw_pkgs if p]
+        elif isinstance(raw_pkgs, str) and raw_pkgs:
+            pkg_list = [raw_pkgs]  # requirements.txt path reference
+        else:
+            pkg_list = []
+
+        raw_id = data.get("addonid") or ""
+        addonid = _norm_id(str(raw_id)) or _norm_id(plugin_dir.name)
+
+        raw_deps = data.get("plugins") or []
+        if isinstance(raw_deps, list):
+            dep_list = [_norm_id(str(x)) for x in raw_deps if str(x).strip()]
+        else:
+            dep_list = []
+
         return {
             "name": _str(data.get("name")),
             "description": _str(data.get("description")),
             "authors": _str(data.get("authors")),
             "tags": tag_list,
             "version": _str(data.get("version")),
+            "packages": pkg_list,
+            "addonid": addonid,
+            "dependencies": dep_list,
         }
 
     # ------------------------------------------------------------------
@@ -317,6 +344,20 @@ class PluginManagerDialog(QDialog):
 
         # DESCRIPTION
         idx = self._detail_section(layout, idx, "DESCRIPTION", plugin["description"], wrap=True)
+
+        # PACKAGES
+        pkgs = plugin.get("packages", [])
+        pkg_str = ", ".join(pkgs) if pkgs else "None"
+        idx = self._detail_section(layout, idx, "PACKAGES", pkg_str, wrap=True)
+
+        # ADDON ID
+        addonid = plugin.get("addonid") or ""
+        idx = self._detail_section(layout, idx, "ADDON ID", addonid if addonid else _NAN)
+
+        # REQUIRES
+        deps = plugin.get("dependencies", [])
+        deps_str = ", ".join(deps) if deps else "None"
+        idx = self._detail_section(layout, idx, "REQUIRES", deps_str, wrap=True)
 
     def _detail_section(self, layout: QVBoxLayout, idx: int, header: str, value: str, wrap: bool = False) -> int:
         h = QLabel(header)

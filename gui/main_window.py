@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import faulthandler
 import traceback
 from pathlib import Path
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QToolBar, QStatusBar, QMessageBox, QMenu, QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QToolBar, QStatusBar, QMessageBox, QMenu, QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QApplication
 from PySide6.QtGui     import QAction, QKeySequence, QIcon, QPixmap, QPainter, QActionGroup
 from PySide6.QtCore    import Qt, QSize, QByteArray, QEvent, QTimer
 from dataclasses import dataclass, field
@@ -21,6 +23,14 @@ from gui.logger import log, Level
 from gui.widgets.basic_shapes import ShapeDrawer, IconColors
 from gui.widgets.icon_provider import load_icon
 from gui.items.wire import ConnectionItem
+from core.plugin_packages import (
+    resolve_packages, get_packages_dir,
+    _package_name, is_package_installed, is_in_main_venv,
+    detect_plugin_conflicts, install_packages,
+)
+from gui.menu.plugin_manager_dialog import PluginManagerDialog
+from core.plugin_loader import PluginLoader
+from core.registry import get_default_registry
 
 
 def create_icon(shape_func, color=IconColors.DEFAULT, size=16) -> QIcon:
@@ -106,6 +116,7 @@ class MainWindow(QMainWindow):
         self._update_status_right()
         self.scene.graph_changed.connect(self._on_changed)
 
+        self._install_plugin_packages()
         self._load_plugins()
         self.panel_manager.load_and_setup_plugin_panels()
 
@@ -482,7 +493,6 @@ class MainWindow(QMainWindow):
     def _save_config(self) -> None:
         """Save application configuration (recent files, last project, path stack)."""
         try:
-            from gui.items.wire import ConnectionItem
             config_path = self._get_config_path()
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             config_data = {
@@ -520,7 +530,6 @@ class MainWindow(QMainWindow):
                 self.unit_s_act.setChecked(unit == "s")
 
             # Load Wire Style
-            from gui.items.wire import ConnectionItem
             style = config_data.get("wire_style", "spline")
             ConnectionItem.wire_style = style
             if hasattr(self, "wire_spline_act"):
@@ -814,17 +823,101 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _install_plugin_packages(self) -> None:
+        """Install missing pip packages declared by enabled plugins.
+
+        Packages are installed into each plugin's own .addon_packages/ directory
+        so the main venv is never modified. Plugin package dirs are appended to
+        sys.path so the main venv always takes priority.
+
+        The console panel is shown and the window displayed early only when an
+        actual installation is required.
+        """
+        plugins_dir = Path(__file__).parent.parent / "plugins"
+        if not plugins_dir.is_dir():
+            return
+
+        # Collect all requirements per plugin for conflict detection.
+        all_reqs: dict[str, list[str]] = {}
+        for entry in sorted(plugins_dir.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("_"):
+                continue
+            if entry.name in self._disabled_plugins:
+                continue
+            if not (entry / "addoninfo.json").exists():
+                continue
+            pkgs = resolve_packages(entry)
+            if pkgs:
+                all_reqs[entry.name] = pkgs
+
+        if not all_reqs:
+            return
+
+        # Warn about version conflicts between plugins.
+        for warning in detect_plugin_conflicts(all_reqs):
+            log.warning(f"[Packages] {warning}")
+
+        # Determine which packages actually need installing.
+        needs_install: list[tuple[Path, list[str]]] = []
+        for plugin_name, specs in all_reqs.items():
+            plugin_dir = plugins_dir / plugin_name
+            packages_dir = get_packages_dir(plugin_dir)
+            to_install: list[str] = []
+            for spec in specs:
+                name = _package_name(spec)
+                found, ver = is_in_main_venv(name)
+                if found:
+                    # Main venv has this package — skip install, it will be used.
+                    log.info(
+                        f"[Packages] '{plugin_name}' requires {spec}; "
+                        f"using main-venv version {ver} (skipping install)."
+                    )
+                    continue
+                if is_package_installed(name, packages_dir):
+                    continue  # already installed in plugin dir
+                to_install.append(spec)
+            if to_install:
+                needs_install.append((plugin_dir, to_install))
+
+        if not needs_install:
+            return
+
+        # Show the console so the user can watch installation progress.
+        console_panel = self.panel_manager.get_panel("ConsoleDock")
+        if console_panel:
+            console_panel.show()
+        self.show()
+        QApplication.processEvents()
+
+        for plugin_dir, to_install in needs_install:
+            log.info(f"[Packages] Installing for '{plugin_dir.name}': {', '.join(to_install)}")
+            QApplication.processEvents()
+
+            packages_dir = get_packages_dir(plugin_dir)
+
+            def _on_line(line: str, _app=QApplication) -> None:
+                if line:
+                    log.info(f"  pip | {line}")
+                    _app.processEvents()
+
+            ok = install_packages(to_install, packages_dir, output_cb=_on_line)
+            if ok:
+                log.info(f"[Packages] '{plugin_dir.name}' packages installed successfully.")
+            else:
+                log.error(
+                    f"[Packages] Failed to install packages for '{plugin_dir.name}'. "
+                    f"Plugin may not work correctly."
+                )
+            QApplication.processEvents()
+
     def _load_plugins(self) -> None:
         """Discover and load plugins from the plugins/ directory."""
-        from core.plugin_loader import PluginLoader
-        from core.registry import get_default_registry
         plugins_dir = Path(__file__).parent.parent / "plugins"
         loaded = PluginLoader(get_default_registry()).discover(plugins_dir, disabled=self._disabled_plugins)
         if loaded:
             log.info(f"Loaded plugins: {', '.join(loaded)}")
 
     def _open_plugin_manager(self) -> None:
-        from gui.menu.plugin_manager_dialog import PluginManagerDialog
         plugins_dir = Path(__file__).parent.parent / "plugins"
         dlg = PluginManagerDialog(plugins_dir, self._disabled_plugins, parent=self)
         if dlg.exec() == PluginManagerDialog.Accepted:
@@ -1154,7 +1247,6 @@ class MainWindow(QMainWindow):
         missing = getattr(graph, '_missing_plugins', [])
         if not missing:
             return
-        from PySide6.QtWidgets import QMessageBox
         names = "\n".join(f"  • {p}" for p in missing)
         QMessageBox.warning(
             self,
@@ -1244,8 +1336,6 @@ class MainWindow(QMainWindow):
 
     def _setup_crash_reporting(self):
         """Initialize logging for both Python exceptions and C-level fatal crashes."""
-        import tempfile
-        import shutil
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         crash_dir = os.path.join(root_dir, "error")
         os.makedirs(crash_dir, exist_ok=True)
@@ -1307,7 +1397,6 @@ class MainWindow(QMainWindow):
                     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     crash_dir = os.path.join(root_dir, "error")
                     dest = os.path.join(crash_dir, f"fatal_crash_{int(time.time())}.log")
-                    import shutil
                     shutil.move(temp_path, dest)
                 else:
                     # Otherwise delete it

@@ -1,7 +1,11 @@
 from __future__ import annotations
 import os
 
-from core.node import BaseNode, In, OptIn, Out
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+
+from core.node import BaseNode, In, OptIn, Out, port_uses_graph_variables
+from gui.widgets.node_widgets import make_file_picker
 
 
 class VariableOutNode(BaseNode):
@@ -152,7 +156,6 @@ class SessionNode(BaseNode):
     def create_widget_for_port(self, port):
         if port.name != "session_item":
             return None
-        from gui.widgets.node_widgets import make_file_picker
         val = port.value if port and port.value else ""
         name = self._get_clean_name(val)
         label_text = name if name else "Select session…"
@@ -161,7 +164,6 @@ class SessionNode(BaseNode):
 
     def _show_session_dialog(self):
         from gui.menu.file_search_dialog import SessionSearchDialog
-        from PySide6.QtWidgets import QApplication
         from gui.main_window import MainWindow
         main_window = next(
             (w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None
@@ -191,9 +193,7 @@ class SessionNode(BaseNode):
 
 
 def _handle_variable_drop(scene, pos, value, modifiers) -> bool:
-    from PySide6.QtCore import Qt
     from nodes import NODE_CLASS_MAPPINGS
-    from core.node import port_uses_graph_variables
     cls_name = "VariableInNode" if (modifiers & Qt.AltModifier) else "VariableOutNode"
     cls = NODE_CLASS_MAPPINGS.get(cls_name)
     if not cls:

@@ -9,6 +9,10 @@ from typing import TYPE_CHECKING, Any, Callable
 from PySide6.QtCore import QTimer
 from PySide6.QtGui  import QUndoCommand, QUndoStack
 
+from core.graph_store_registry import get_all_store_specs
+from core.commands import CompositeCommand
+from .graph import Connection
+
 if TYPE_CHECKING:
     from .graph import Graph
     from .node import BaseNode
@@ -25,7 +29,6 @@ class StateSnapshot:
 
     @classmethod
     def capture(cls, graph: Graph, external: dict | None = None) -> StateSnapshot:
-        from core.graph_store_registry import get_all_store_specs
         ext = external or {}
         stores: dict[str, Any] = {}
         for spec in get_all_store_specs():
@@ -82,8 +85,6 @@ class HistoryCommand(QUndoCommand):
         self._apply(self.after)
 
     def _apply(self, snapshot: StateSnapshot) -> None:
-        from .graph import Connection
-
         mgr = self._mgr() if self._mgr else None
 
         already = mgr._restoring if mgr else False
@@ -342,7 +343,6 @@ class HistoryManager:
                 self._cmd_stack._current_batch = None
 
                 if batch:
-                    from core.commands import CompositeCommand
                     composite = CompositeCommand(batch, name)
                     wrapper = _QCommandWrapper(composite, self)
                     self._cmd_stack._push_wrapper(wrapper)

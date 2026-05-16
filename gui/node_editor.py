@@ -8,12 +8,12 @@ import uuid
 
 from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QMenu,
                                 QWidget, QPushButton, QFileDialog, QLabel,
-                                QGraphicsOpacityEffect, QDialog)
+                                QGraphicsOpacityEffect, QDialog, QApplication)
 from PySide6.QtGui     import (QColor, QPainter, QBrush, QPen, QKeySequence,
                                 QKeyEvent, QWheelEvent, QMouseEvent, QCursor,
                                 QUndoCommand, QUndoStack, QDragEnterEvent, QDropEvent, qGray,
                                 QDragMoveEvent, QAction, QFont, QPixmap,
-                                QSurfaceFormat, QPainterPath)
+                                QSurfaceFormat, QPainterPath, QTransform)
 from PySide6.QtCore    import Qt, QPointF, QPoint, Signal, QRectF, QTimer, QPropertyAnimation, QLineF
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -35,6 +35,7 @@ from gui.widgets.safe_graphics_view import SafeGraphicsView
 from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
 from nodes.subgraph.subgraph import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
 from gui.items.node       import NodeItem, ResizeHandle, PortItem, DEFAULT_W
+from gui.commands         import PropertyCommand, FoldCommand, ResizeNodeCommand
 from gui.items.wire import ConnectionItem
 from gui.dialogs import RenameDialog
 from gui.theme import *
@@ -1008,149 +1009,7 @@ class NodeEditorScene(QGraphicsScene):
 
 
 
-class ResizeNodeCommand(QUndoCommand):
-    def __init__(self, item: NodeItem, old_w: float, old_h: float, new_w: float, new_h: float):
-        super().__init__(f"Resize Node: {item.node.title}")
-        self._scene   = item.scene()
-        self._node_id = item.node.id
-        self.old_w = old_w
-        self.old_h = old_h
-        self.new_w = new_w
-        self.new_h = new_h
-
-    def _get_item(self):
-        return self._scene._node_items.get(self._node_id) if self._scene else None
-
-    def undo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        item.resize_to(self.old_w, self.old_h)
-        sc = item.scene()
-        if sc:
-            sc._emit_graph_changed()
-            sc._undo_manager.sync()
-
-    def redo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        item.resize_to(self.new_w, self.new_h)
-        sc = item.scene()
-        if sc:
-            sc._emit_graph_changed()
-            sc._undo_manager.sync()
-        log.debug(f"Resized node to {self.new_w:.1f}x{self.new_h:.1f}")
-
-
-class PropertyCommand(QUndoCommand):
-    """Undo/redo a single port value change.  Works for both QLineEdit and QComboBox."""
-
-    def __init__(self, node_item: NodeItem, port_name: str, old_val, new_val):
-        super().__init__(f"Change {port_name}")
-        self._scene   = node_item.scene()
-        self._node_id = node_item.node.id
-        self.port_name = port_name
-        self.old_val   = old_val
-        self.new_val   = new_val
-
-    def _get_item(self):
-        return self._scene._node_items.get(self._node_id) if self._scene else None
-
-    def undo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        self._apply(item, self.old_val)
-        sc = item.scene()
-        if sc:
-            sc._undo_manager.sync()
-
-    def redo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        self._apply(item, self.new_val)
-        sc = item.scene()
-        if sc:
-            sc._undo_manager.sync()
-
-    def _apply(self, node_item, val) -> None:
-        from gui.items.node import _coerce
-
-        port = node_item.node.inputs.get(self.port_name)
-
-        if port and port.port_type == PortType.FLOAT:
-            try:
-                val_str = f"{float(val):g}"
-            except (ValueError, TypeError):
-                val_str = str(val)
-        else:
-            val_str = str(val) if val is not None else ""
-
-        if port:
-            _coerce(port, val_str)
-
-        scene = node_item.scene()
-        if scene and port:
-            scene._after_node_mutation(node_item.node.id)
-            scene._emit_graph_changed()
-
-
-class FoldCommand(QUndoCommand):
-    """Undo/redo node fold/unfold operations."""
-
-    def __init__(self, node_item: 'NodeItem', old_folded: bool, new_folded: bool):
-        super().__init__(f"{'Fold' if new_folded else 'Unfold'} Node: {node_item.node.title}")
-        self._scene   = node_item.scene()
-        self._node_id = node_item.node.id
-        self.old_folded = old_folded
-        self.new_folded = new_folded
-        self.old_height = node_item._unfolded_height
-
-    def _get_item(self):
-        return self._scene._node_items.get(self._node_id) if self._scene else None
-
-    def undo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        self._apply(item, self.old_folded)
-        sc = item.scene()
-        if sc:
-            sc._undo_manager.sync()
-
-    def redo(self):
-        item = self._get_item()
-        if item is None:
-            return
-        self._apply(item, self.new_folded)
-        sc = item.scene()
-        if sc:
-            sc._undo_manager.sync()
-
-    def _apply(self, node_item, folded: bool) -> None:
-        if not node_item.node.folded and folded:
-            node_item._unfolded_height = node_item._h
-
-        node_item.node.folded = folded
-        node_item.refresh_ports()
-
-        if not folded and self.old_height is not None:
-            node_item.prepareGeometryChange()
-            node_item._h = self.old_height
-            node_item.node.height = self.old_height
-            node_item.handle.setPos(node_item._w, node_item._h)
-            node_item._unfolded_height = None
-
-        node_item.handle.setVisible(not folded)
-
-        scene = node_item.scene()
-        if scene:
-            scene.refresh_connections(node_item)
-            scene._emit_graph_changed()
-
-#  View 
+#  View
 
 class NodeEditorView(SafeGraphicsView):
     compile_requested  = Signal()
@@ -1394,8 +1253,6 @@ class NodeEditorView(SafeGraphicsView):
         super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        from PySide6.QtWidgets import QApplication
-
         # Check if focus is on a widget or if scene has a focused item (QGraphicsProxyWidget)
         focus_widget = QApplication.focusWidget()
         scene_focused = self.scene().focusItem() is not None
@@ -1479,7 +1336,6 @@ class NodeEditorView(SafeGraphicsView):
             
         # Use the complete transformation matrix if available
         if "transform_m11" in state:
-            from PySide6.QtGui import QTransform
             transform = QTransform(
                 state["transform_m11"], state["transform_m12"], state["transform_m21"],
                 state["transform_m22"], state["transform_dx"], state["transform_dy"]
@@ -1493,7 +1349,6 @@ class NodeEditorView(SafeGraphicsView):
         
         # Restore scroll position if available, with delay to ensure proper layout
         if "scroll_x" in state and "scroll_y" in state:
-            from PySide6.QtCore import QTimer
             def restore_scroll():
                 self.horizontalScrollBar().setValue(state["scroll_x"])
                 self.verticalScrollBar().setValue(state["scroll_y"])

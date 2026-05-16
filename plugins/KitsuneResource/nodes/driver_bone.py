@@ -14,9 +14,10 @@ class DriverBoneNode(BaseNode):
     title    = "Driver Bone"
     CATEGORY = "KitsuneResource"
     color    = "#61afef"
+    default_width = 265
 
     driver_bone    = In("STRING", label="Driver Bone")
-    pose_file      = In("FILE",   label="Pose File", allow_connection=True, editable=False)
+    pose_file      = In("FILE",   label="Pose File", allow_connection=True)
     restpose_file  = OptIn("FILE",   default="", label="Restpose File")
     restpose_frame = OptIn("INT",    default=0,   label="Restpose Frame")
     scale          = OptIn("FLOAT",  default=1.0, label="Scale")

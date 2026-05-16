@@ -13,10 +13,10 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QFileDialog,
     QFrame,
+    QApplication,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QCursor, QPainter
-from PySide6.QtWidgets import QApplication
 
 from core.node import port_uses_graph_variables, PortType, PORT_COLORS
 from core.port_type_registry import (
@@ -27,6 +27,10 @@ from core.port_type_registry import (
 from gui.theme import *
 from gui.items.node import NodeItem
 from gui.panels.base_panel import BasePanel
+from gui.logger import log
+from gui.commands import PropertyCommand
+from gui.menu.file_search_dialog import GenericSelectionDialog
+from core.file_picker_registry import get_file_picker
 
 if TYPE_CHECKING:
     from gui.main_window import MainWindow
@@ -446,12 +450,10 @@ class SelectedNodePanel(QWidget):
         err = _validate_port_text(port.port_type, new_val)
         self._item.node.error_msg = err
         if err:
-            from gui.logger import log
             log.error(f"[{self._item.node.title}] {err}")
             return
         self._suppress_refresh = True
         try:
-            from gui.node_editor import PropertyCommand
             self.main_window.scene.undo_stack.push(PropertyCommand(self._item, pname, old_val, new_val))
         finally:
             self._suppress_refresh = False
@@ -467,7 +469,6 @@ class SelectedNodePanel(QWidget):
         new_val = not bool(old_val)
         self._suppress_refresh = True
         try:
-            from gui.node_editor import PropertyCommand
             self.main_window.scene.undo_stack.push(PropertyCommand(self._item, pname, old_val, new_val))
             btn.setText("True" if new_val else "False")
         finally:
@@ -480,7 +481,6 @@ class SelectedNodePanel(QWidget):
         if not port:
             return
         graph = self.main_window.scene.graph
-        from gui.menu.file_search_dialog import GenericSelectionDialog, FileSearchDialog
         mw = self.main_window
 
         def _commit(new_val) -> None:
@@ -491,17 +491,19 @@ class SelectedNodePanel(QWidget):
             btn.setText(display[:24] + "…" if len(display) > 25 else display)
             self._suppress_refresh = True
             try:
-                from gui.node_editor import PropertyCommand
                 self.main_window.scene.undo_stack.push(PropertyCommand(self._item, pname, old_val, new_val))
             finally:
                 self._suppress_refresh = False
 
         if port.enum_filter and not port.enum_options:
-            dialog = FileSearchDialog(parent=mw, file_filter=port.enum_filter,
-                                      title=port.label or pname)
-            _position_near_cursor(dialog)
-            if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
-                _commit(dialog.selected_file)
+            picker = get_file_picker("asset")
+            if picker is not None:
+                path = picker(mw, port.enum_filter, port.label or pname)
+            else:
+                ext_str = " ".join(f"*{e}" for e in port.enum_filter) if port.enum_filter else "*.*"
+                path, _ = QFileDialog.getOpenFileName(mw, port.label or pname, "", f"Files ({ext_str})")
+            if path:
+                _commit(path)
         else:
             if port.enum_options is not None:
                 options = port.enum_options

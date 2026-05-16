@@ -1,3 +1,4 @@
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QDoubleSpinBox
 from core.port_type_registry import register_port_type, PortTypeSpec
 
 # Matches EDIT_STYLE from gui/theme.py
@@ -44,8 +45,6 @@ def _parse_vec3(s):
 
 
 def _make_vector3_canvas_widget(port, parent=None):
-    from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit
-
     vals = _parse_vec3(port.value)
 
     container = QWidget(parent)
@@ -78,8 +77,6 @@ def _make_vector3_canvas_widget(port, parent=None):
 
 
 def _make_vector3_inspector_widget(port):
-    from PySide6.QtWidgets import QWidget, QHBoxLayout, QDoubleSpinBox
-
     vals = _parse_vec3(port.value)
 
     container = QWidget()

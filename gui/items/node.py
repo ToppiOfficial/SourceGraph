@@ -1,20 +1,23 @@
 from __future__ import annotations
 import os
 from typing import Any
-from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget, 
+from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget,
                                 QHBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem,
-                                QPushButton)
-from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath)
-from PySide6.QtCore    import Qt, QRectF, QPointF
+                                QPushButton, QApplication, QTextEdit)
+from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath, QFontMetrics)
+from PySide6.QtCore    import Qt, QRectF, QPointF, QTimer
 
-from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables
+from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables, _coerce
 from core.port_type_registry import (
     get_color as _get_port_color,
     is_editable as _type_editable,
     get_port_type_spec as _get_type_spec,
 )
+from core.file_picker_registry import get_file_picker
 from gui.theme import *
 from gui.widgets.basic_shapes import ShapeDrawer
+from gui.logger import log
+from gui.commands import PropertyCommand, FoldCommand, ResizeNodeCommand
 import math as _math
 
 # -- Layout constants -----------------------------------------------------------
@@ -185,7 +188,6 @@ class ResizeHandle(QGraphicsItem):
 
         p = self.parentItem()
         if p and (abs(p._w - self._start_w) > 1.0 or abs(p._h - self._start_h) > 1.0):
-            from gui.node_editor import ResizeNodeCommand
             sc = p.scene()
             if sc:
                 sc.undo_stack.push(ResizeNodeCommand(p, self._start_w, self._start_h, p._w, p._h))
@@ -321,7 +323,6 @@ class NodeItem(QGraphicsItem):
         if hasattr(self, "_cached_ideal_lbl_w"):
             return self._cached_ideal_lbl_w
             
-        from PySide6.QtGui import QFontMetrics
         metrics = QFontMetrics(QFont("Segoe UI", 8))
         max_w = 0
         for name, port in self.node.inputs.items():
@@ -559,8 +560,40 @@ class NodeItem(QGraphicsItem):
             
             return container
             
+        elif port.port_type == PortType.FILE:
+            container = QWidget(parent)
+            container.setFixedHeight(22)
+            container.setObjectName("NumberInputContainer")
+            container.setStyleSheet(NUMBER_INPUT_STYLE)
+
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+
+            edit = QLineEdit(container)
+            edit.setFixedHeight(20)
+            edit.setStyleSheet(
+                "QLineEdit { background: transparent; border: none; font-size: 11px; padding: 0px 4px; }"
+            )
+            v = port.value
+            edit.setText(str(v) if v is not None else "")
+            edit.setProperty("original_val", port.value)
+
+            btn = QPushButton("...", container)
+            btn.setFixedSize(24, 20)
+            btn.setStyleSheet(NODE_NUMBER_BTN_STYLE)
+            btn.setFocusPolicy(Qt.NoFocus)
+
+            layout.addWidget(edit, 1)
+            layout.addWidget(btn)
+
+            container.setProperty("widget_type", "file")
+            container.file_edit = edit
+            container.browse_btn = btn
+            return container
+
         else:
-            # Text input for STRING, INT, FLOAT, FILE, ANY
+            # Text input for STRING, ANY, etc.
             edit = QLineEdit(parent)
             edit.setFixedHeight(22)
             edit.setStyleSheet(NODE_WIDGET_STYLE)
@@ -639,7 +672,6 @@ class NodeItem(QGraphicsItem):
         self.node.error_msg = error
         self.setToolTip(error or "")
         if error:
-            from gui.logger import log
             log.error(f"[{self.node.title}] {error}")
         self.update()
 
@@ -647,7 +679,6 @@ class NodeItem(QGraphicsItem):
         if sc:
             # Update the cache for the next edit cycle
             edit.setProperty("original_val", new_val)
-            from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
     def _on_combo_changed(self, port_name: str, combo: QComboBox) -> None:
@@ -657,7 +688,6 @@ class NodeItem(QGraphicsItem):
             return
         sc = self.scene()
         if sc:
-            from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
 
     def dragEnterEvent(self, event) -> None:
@@ -701,7 +731,6 @@ class NodeItem(QGraphicsItem):
         path, _ = QFileDialog.getOpenFileName(None, "Select File", "", "All Files (*)")
         if path:
             edit.setText(path)
-            from PySide6.QtCore import QTimer
             QTimer.singleShot(0, lambda: self._on_edit_finished(port_name, edit))
 
     # -- public interface ------------------------------------------------------
@@ -747,8 +776,6 @@ class NodeItem(QGraphicsItem):
 
     def _update_widget_value(self, widget: QWidget, port: Port):
         """Update widget value based on port type and widget type."""
-        from PySide6.QtWidgets import QLineEdit, QComboBox, QPushButton, QTextEdit
-        
         if isinstance(widget, QLineEdit):
             v = port.value
             val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
@@ -763,7 +790,15 @@ class NodeItem(QGraphicsItem):
             if edit.text() != val_str:
                 edit.setText(val_str)
                 edit.setProperty("original_val", port.value)
-        
+
+        elif widget.property("widget_type") == "file":
+            edit = widget.file_edit
+            v = port.value
+            val_str = str(v) if v is not None else ""
+            if edit.text() != val_str:
+                edit.setText(val_str)
+                edit.setProperty("original_val", port.value)
+
         elif isinstance(widget, QComboBox):
             # Handle combo box updates
             widget.blockSignals(True)
@@ -787,8 +822,6 @@ class NodeItem(QGraphicsItem):
 
     def _connect_widget_events(self, name: str, widget: QWidget):
         """Connect widget events to handle value changes."""
-        from PySide6.QtWidgets import QLineEdit, QComboBox, QPushButton
-        
         if isinstance(widget, QLineEdit):
             # Real-time feedback (non-undoable)
             widget.textChanged.connect(
@@ -818,6 +851,17 @@ class NodeItem(QGraphicsItem):
         elif widget.property("widget_type") == "enum":
             widget.clicked.connect(
                 lambda: self._on_enum_clicked(name)
+            )
+        elif widget.property("widget_type") == "file":
+            edit = widget.file_edit
+            edit.textChanged.connect(
+                lambda text: self._on_widget_changed(name, text)
+            )
+            edit.editingFinished.connect(
+                lambda: self._on_edit_finished(name, edit)
+            )
+            widget.browse_btn.clicked.connect(
+                lambda: self._browse_file(name, edit)
             )
         elif isinstance(widget, QComboBox):
             widget.currentIndexChanged.connect(
@@ -849,21 +893,22 @@ class NodeItem(QGraphicsItem):
                 else:
                     options = assets
         
-        # Open dialog
-        from gui.menu.file_search_dialog import GenericSelectionDialog, FileSearchDialog
-        
+        # These imports are inline to avoid circular import via file_search_dialog → main_window
+        from gui.menu.file_search_dialog import GenericSelectionDialog
+        from gui.main_window import MainWindow
+        mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
+
         # For asset ports, use specialized file search dialog if filter exists
         if port.enum_filter and not port.enum_options:
-            from PySide6.QtWidgets import QApplication
-            from gui.main_window import MainWindow
-            mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
-            dialog = FileSearchDialog(parent=mw, file_filter=port.enum_filter, title=port.label or port_name)
-            if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
-                self._update_port_value(port_name, dialog.selected_file)
+            picker = get_file_picker("asset")
+            if picker is not None:
+                path = picker(mw, port.enum_filter, port.label or port_name)
+            else:
+                ext_str = " ".join(f"*{e}" for e in port.enum_filter) if port.enum_filter else "*.*"
+                path, _ = QFileDialog.getOpenFileName(mw, port.label or port_name, "", f"Files ({ext_str})")
+            if path:
+                self._update_port_value(port_name, path)
         else:
-            from PySide6.QtWidgets import QApplication
-            from gui.main_window import MainWindow
-            mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
             dialog = GenericSelectionDialog(options, parent=mw, title=port.label or port_name)
             if dialog.exec() == GenericSelectionDialog.Accepted and dialog.selected_item:
                 self._update_port_value(port_name, dialog.selected_item)
@@ -875,9 +920,8 @@ class NodeItem(QGraphicsItem):
             return
         sc = self.scene()
         if sc:
-            from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
-    
+
     def _on_widget_changed(self, port_name: str, new_value: str):
         """Handle widget value changes."""
         port = self.node.inputs.get(port_name)
@@ -916,7 +960,6 @@ class NodeItem(QGraphicsItem):
         
         sc = self.scene()
         if sc:
-            from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
     def _on_number_increment(self, port_name: str, direction: int):
@@ -945,7 +988,6 @@ class NodeItem(QGraphicsItem):
             
         sc = self.scene()
         if sc:
-            from gui.node_editor import PropertyCommand
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
     def refresh_ports(self) -> None:
@@ -1157,19 +1199,18 @@ class NodeItem(QGraphicsItem):
             
             # Mathematical ratio: map port count (1-10) to roundness (6-20)
             # Using logarithmic scaling for smooth progression
-            import math
             min_ports, max_ports = 1, 10
             min_radius, max_radius = 6, 20
-            
+
             if total_ports <= min_ports:
                 r = min_radius
             elif total_ports >= max_ports:
                 r = max_radius
             else:
                 # Logarithmic interpolation for smooth scaling
-                log_min = math.log(min_ports)
-                log_max = math.log(max_ports)
-                log_current = math.log(total_ports)
+                log_min = _math.log(min_ports)
+                log_max = _math.log(max_ports)
+                log_current = _math.log(total_ports)
                 ratio = (log_current - log_min) / (log_max - log_min)
                 r = min_radius + ratio * (max_radius - min_radius)
         else:
@@ -1410,7 +1451,6 @@ class NodeItem(QGraphicsItem):
         # Push the fold command to the undo stack
         sc = self.scene()
         if sc:
-            from gui.node_editor import FoldCommand
             sc.undo_stack.push(FoldCommand(self, old_folded, new_folded))
         else:
             # Fallback if no scene (shouldn't happen in normal operation)
@@ -1444,21 +1484,3 @@ class NodeItem(QGraphicsItem):
             sc.graph_changed.emit()
 
 
-def _coerce(port, text: str) -> None:
-    """Write a validated string value back into a port, coercing to the port's native type."""
-    try:
-        if port.port_type == PortType.INT:
-            port.value = int(text)
-        elif port.port_type == PortType.FLOAT:
-            port.value = float(text)
-        elif port.port_type == PortType.BOOL:
-            if isinstance(text, bool):
-                port.value = text
-            else:
-                val = str(text).lower().strip()
-                port.value = val in ("true", "1", "yes")
-        else:
-            # STRING, ENUM, QC_COMMAND, FILE, DICT – store as string
-            port.value = text
-    except ValueError:
-        port.value = text

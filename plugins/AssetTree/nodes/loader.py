@@ -2,7 +2,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from PySide6.QtWidgets import QApplication, QFileDialog
+
 from core.node import BaseNode, In, OptIn, Out
+from core.drop_registry import register_drop_handler
+from core.enum_providers import EnumProvider as _EnumProvider, register_enum_provider
+from core.file_picker_registry import register_file_picker
+from nodes import NODE_CLASS_MAPPINGS
+from gui.widgets.node_widgets import make_file_picker, make_path_editor
+from gui.logger import log
+from gui.menu.file_search_dialog import SubgraphSearchDialog
+from AssetTree.dialogs import FileSearchDialog
 
 
 class FileLoader(BaseNode):
@@ -50,7 +60,6 @@ class FileLoader(BaseNode):
     def create_widget_for_port(self, port):
         if port.name != "asset":
             return None
-        from gui.widgets.node_widgets import make_file_picker
         label_text = os.path.basename(port.value) if port.value else "Select file…"
         container, self._file_label = make_file_picker(label_text, self._show_file_dialog)
         self._asset_port = port
@@ -58,8 +67,6 @@ class FileLoader(BaseNode):
 
     def _show_file_dialog(self):
         try:
-            from gui.menu.file_search_dialog import FileSearchDialog
-            from PySide6.QtWidgets import QApplication
             from gui.main_window import MainWindow
             main_window = next(
                 (w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None
@@ -68,7 +75,6 @@ class FileLoader(BaseNode):
             if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
                 self._set_asset(dialog.selected_file)
         except Exception:
-            from PySide6.QtWidgets import QFileDialog
             path, _ = QFileDialog.getOpenFileName(None, "Select File", "", "All Files (*)")
             if path:
                 self._set_asset(path)
@@ -150,7 +156,6 @@ class OutputFileNode(BaseNode):
     def create_widget_for_port(self, port):
         if port.name != "out_path":
             return None
-        from gui.widgets.node_widgets import make_path_editor
         container, self._path_edit = make_path_editor(
             str(port.value) if port.value else "",
             lambda: self._on_path_changed(),
@@ -159,7 +164,6 @@ class OutputFileNode(BaseNode):
         return container
 
     def _show_save_dialog(self) -> None:
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(None, "Save File As", "", "All Files (*)")
         if path:
             if hasattr(self, '_path_edit'):
@@ -179,7 +183,6 @@ class OutputFileNode(BaseNode):
         self.on_property_changed()
 
     def execute(self, content, out_path: str, **kwargs):
-        from gui.logger import log
         try:
             Path(out_path).write_text(str(content), encoding="utf-8")
             log.info(f"Written -> {out_path}")
@@ -190,8 +193,6 @@ class OutputFileNode(BaseNode):
 
 
 def _handle_asset_drop(scene, pos, value, modifiers) -> bool:
-    import os
-    from nodes import NODE_CLASS_MAPPINGS
     ext = os.path.splitext(value)[1].lower()
     if ext in (".srcsubgraph", ".srcgraph"):
         cls = NODE_CLASS_MAPPINGS.get("SubgraphNode")
@@ -220,12 +221,7 @@ def _handle_asset_drop(scene, pos, value, modifiers) -> bool:
     return True
 
 
-from core.drop_registry import register_drop_handler
 register_drop_handler("asset", _handle_asset_drop)
-
-
-import os as _os
-from core.enum_providers import EnumProvider as _EnumProvider, register_enum_provider
 
 
 class _AssetsEnumProvider(_EnumProvider):
@@ -236,18 +232,18 @@ class _AssetsEnumProvider(_EnumProvider):
         ext_filter = port.enum_filter
         valid: list[str] = []
         for a in assets:
-            if ext_filter and _os.path.splitext(a)[1].lower() not in ext_filter:
+            if ext_filter and os.path.splitext(a)[1].lower() not in ext_filter:
                 continue
-            valid.append(_os.path.normpath(str(a)).replace("\\", "/"))
+            valid.append(os.path.normpath(str(a)).replace("\\", "/"))
         pv_raw = "" if port.value is None else str(port.value)
         if not pv_raw:
             return
-        pv = _os.path.normpath(pv_raw).replace("\\", "/")
+        pv = os.path.normpath(pv_raw).replace("\\", "/")
         if pv in valid:
             port.value = pv
             return
-        base = _os.path.basename(pv)
-        matches = [a for a in valid if _os.path.basename(a) == base]
+        base = os.path.basename(pv)
+        matches = [a for a in valid if os.path.basename(a) == base]
         if len(matches) == 1:
             port.value = matches[0]
         elif len(valid) == 1:
@@ -257,3 +253,21 @@ class _AssetsEnumProvider(_EnumProvider):
 
 
 register_enum_provider("assets", _AssetsEnumProvider())
+
+
+def _asset_picker(parent, file_filter, title):
+    dialog = FileSearchDialog(parent=parent, file_filter=file_filter, title=title)
+    if dialog.exec() == FileSearchDialog.Accepted and dialog.selected_file:
+        return dialog.selected_file
+    return None
+
+
+def _subgraph_picker(parent, file_filter, title):
+    dialog = SubgraphSearchDialog(parent=parent)
+    if dialog.exec() == SubgraphSearchDialog.Accepted and dialog.selected_file:
+        return dialog.selected_file
+    return None
+
+
+register_file_picker("asset", _asset_picker)
+register_file_picker("subgraph", _subgraph_picker)

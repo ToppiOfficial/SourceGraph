@@ -1,8 +1,13 @@
 from __future__ import annotations
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
+
+from core.registry import get_default_registry
+from core.graph_store_registry import get_all_store_specs
+from core.execution import StandardExecutionEngine
 
 if TYPE_CHECKING:
     from .node import BaseNode
@@ -12,6 +17,8 @@ from core.events import (
     EventBus, NodeAddedEvent, NodeRemovedEvent,
     ConnectionAddedEvent, ConnectionRemovedEvent, GraphLoadedEvent,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -180,14 +187,10 @@ class Graph:
                 if c.src_node == node_id or c.dst_node == node_id]
 
     def execute_with_context(self, context: ExecutionContext) -> dict[str, ExecutionResult]:
-        from .execution import StandardExecutionEngine
-
         engine = StandardExecutionEngine()
         return engine.execute(self, context)
 
     def to_dict(self) -> dict:
-        from core.registry import get_default_registry
-        from core.graph_store_registry import get_all_store_specs
         registry = get_default_registry()
         plugin_deps: set[str] = set()
         for node in self.nodes.values():
@@ -208,8 +211,6 @@ class Graph:
         return d
 
     def load_dict(self, data: dict, registry: dict | None = None) -> None:
-        from gui.logger import log
-        from core.registry import get_default_registry
         _reg = get_default_registry()
         loaded_plugins = {s[len("plugin:"):] for s in _reg._sources.values() if s.startswith("plugin:")}
         self._missing_plugins: list[str] = [p for p in data.get("required_plugins", []) if p not in loaded_plugins]
@@ -220,7 +221,6 @@ class Graph:
         self.nodes.clear()
         self.connections.clear()
 
-        from core.graph_store_registry import get_all_store_specs
         self._state.ext_stores.clear()
         for spec in get_all_store_specs():
             self._state.ext_stores.update(spec.load(data))
@@ -242,7 +242,7 @@ class Graph:
                 n.graph = self
                 self.nodes[n.id] = n
             else:
-                log.warning(f"Unknown node type '{nd.get('type')}' — skipped")
+                _logger.warning(f"Unknown node type '{nd.get('type')}' — skipped")
 
         # Synchronize dynamic ports for all nodes before processing connections
         for node in self.nodes.values():
@@ -251,7 +251,7 @@ class Graph:
         for cd in data.get("connections", []):
             self.connections.append(Connection.from_dict(cd))
 
-        log.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
+        _logger.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
 
         # Signal bulk load complete — scene subscribes to this and rebuilds
         self.bus.emit(GraphLoadedEvent())

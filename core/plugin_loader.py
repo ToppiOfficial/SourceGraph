@@ -27,7 +27,13 @@ class PluginLoader:
         self._loaded: list[str] = []
 
     def discover(self, plugins_dir: Path, disabled: set[str] | None = None) -> list[str]:
-        """Scan *plugins_dir* for plugin subdirs and load node/panel classes from each."""
+        """Scan *plugins_dir* for plugin subdirs and load node/panel classes from each.
+
+        Requires each plugin to have an ``addoninfo.json`` with an ``addonid`` field.
+        Plugins with duplicate addonids (first alphabetically wins), unresolvable
+        dependencies, or circular dependencies are skipped with a console warning.
+        Remaining plugins load in dependency order.
+        """
         if not plugins_dir.is_dir():
             return []
 
@@ -37,12 +43,110 @@ class PluginLoader:
         if plugins_str not in sys.path:
             sys.path.insert(0, plugins_str)
 
+        from collections import deque
+        from core.plugin_packages import (
+            get_packages_dir, add_packages_to_path,
+            read_addonid, read_plugin_deps,
+        )
+
+        # Phase 1: collect valid candidates, deduplicate by addonid.
+        # candidates: folder_name -> {addonid, deps, dir}
+        candidates: dict[str, dict] = {}
+        seen_ids: dict[str, str] = {}  # addonid -> first folder that claimed it
+
         for entry in sorted(plugins_dir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("_"):
                 continue
             if entry.name in _disabled:
                 continue
+            addonid = read_addonid(entry)
+            if addonid is None:
+                print(f"[PluginLoader] Skipping '{entry.name}': no addoninfo.json")
+                continue
+            if not addonid:
+                print(f"[PluginLoader] WARNING: Skipping '{entry.name}': addoninfo.json is missing 'addonid'")
+                continue
+            if addonid in seen_ids:
+                print(
+                    f"[PluginLoader] Skipping '{entry.name}': addonid '{addonid}' "
+                    f"already claimed by '{seen_ids[addonid]}'"
+                )
+                continue
+            seen_ids[addonid] = entry.name
+            candidates[entry.name] = {
+                "addonid": addonid,
+                "deps": read_plugin_deps(entry),
+                "dir": entry,
+            }
+
+        if not candidates:
+            return []
+
+        # Phase 2: resolve dependencies, propagate skips.
+        id_to_folder: dict[str, str] = {v["addonid"]: k for k, v in candidates.items()}
+        skipped: set[str] = set()
+
+        changed = True
+        while changed:
+            changed = False
+            for folder, info in candidates.items():
+                if folder in skipped:
+                    continue
+                for dep_id in info["deps"]:
+                    dep_folder = id_to_folder.get(dep_id)
+                    if dep_folder is None:
+                        print(
+                            f"[PluginLoader] Skipping '{folder}': "
+                            f"dependency '{dep_id}' not found"
+                        )
+                        skipped.add(folder)
+                        changed = True
+                        break
+                    if dep_folder in skipped:
+                        print(
+                            f"[PluginLoader] Skipping '{folder}': "
+                            f"dependency '{dep_id}' ('{dep_folder}') could not load"
+                        )
+                        skipped.add(folder)
+                        changed = True
+                        break
+
+        active: dict[str, dict] = {
+            f: info for f, info in candidates.items() if f not in skipped
+        }
+
+        # Phase 3: topological sort (Kahn's algorithm).
+        in_degree: dict[str, int] = {f: 0 for f in active}
+        dependents: dict[str, list[str]] = {f: [] for f in active}
+
+        for folder, info in active.items():
+            for dep_id in info["deps"]:
+                dep_folder = id_to_folder.get(dep_id)
+                if dep_folder and dep_folder in active:
+                    in_degree[folder] += 1
+                    dependents[dep_folder].append(folder)
+
+        queue: deque[str] = deque(f for f in active if in_degree[f] == 0)
+        load_order: list[str] = []
+
+        while queue:
+            folder = queue.popleft()
+            load_order.append(folder)
+            for dependent in dependents[folder]:
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+
+        for folder in active:
+            if folder not in load_order:
+                print(f"[PluginLoader] Skipping '{folder}': circular dependency detected")
+
+        # Phase 4: load in dependency order.
+        for folder in load_order:
+            entry = active[folder]["dir"]
             loaded_something = False
+
+            add_packages_to_path(get_packages_dir(entry))
 
             # Types must load before nodes so parse_type() resolves them
             # when node module-level code runs.

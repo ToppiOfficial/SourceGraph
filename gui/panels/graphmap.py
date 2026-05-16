@@ -2,8 +2,9 @@ from __future__ import annotations
 import os
 import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsItem
-from PySide6.QtCore import Qt, QEvent, QTimer
-from PySide6.QtGui import QKeyEvent, QKeySequence, QPainter, QWheelEvent
+from PySide6.QtCore import Qt, QEvent, QTimer, QRectF, QPointF
+from PySide6.QtGui import (QKeyEvent, QKeySequence, QPainter, QWheelEvent,
+                            QPainterPath, QFont, QPen, QColor, QBrush, QLinearGradient, QTransform)
 
 from gui.panels.base_panel import BasePanel
 from core.node import BaseNode, Port, PortType
@@ -12,10 +13,8 @@ from gui.node_editor import NodeEditorScene, NodeEditorView
 from gui.theme import ACCENT, BG_RAISED, COLOR_ERROR, FG_MAIN
 from gui.logger import log
 from gui.widgets.safe_graphics_view import SafeGraphicsView
-from gui.items.node import NodeItem
+from gui.items.node import NodeItem, PortItem, _folded_height
 from gui.items.wire import ConnectionItem
-from PySide6.QtGui import QPainterPath, QFont, QPainter, QPen, QColor, QBrush, QLinearGradient
-from PySide6.QtCore import QRectF, QPointF
 
 class GraphMapNodeItem(NodeItem):
     """Custom node item for graph map with larger folded header and read-only ports."""
@@ -23,7 +22,6 @@ class GraphMapNodeItem(NodeItem):
 
     def _calculate_height(self):
         """Override to use larger title height for folded nodes in graph map."""
-        from gui.items.node import _folded_height
         if self.node.folded:
             visible_outputs = sum(1 for p in self.node.outputs.values() if p.allow_connection)
             visible_inputs = sum(1 for p in self.node.inputs.values()
@@ -70,9 +68,6 @@ class GraphMapScene(NodeEditorScene):
 
     def mousePressEvent(self, event):
         """Block wire creation while allowing node selection for navigation."""
-        from gui.items.node import PortItem
-        from PySide6.QtGui import QTransform
-
         item = self.itemAt(event.scenePos(), QTransform())
 
         # Block port clicks (prevents wire creation)
@@ -196,7 +191,6 @@ class GraphMapPanel(BasePanel):
             return
             
         if len(selected) == 1:
-            from gui.items.node import NodeItem
             item = selected[0]
             if isinstance(item, NodeItem) and hasattr(item.node, "nav_node"):
                 nav = item.node.nav_node

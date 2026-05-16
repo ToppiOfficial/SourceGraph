@@ -1,7 +1,9 @@
 {
+    "addonid": "asset_tree",
     "name": "Asset Tree",
     "description": "Provides an asset browser panel and loader nodes for managing project files within SrcGraph.",
     "authors": ["toppi"],
     "tags": ["assets", "io"],
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "plugins": []
 }
