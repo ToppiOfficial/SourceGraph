@@ -39,18 +39,50 @@
 
 ## Getting Started
 
+### Windows (Recommended)
+
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/yourusername/SrcGraph.git
    cd SrcGraph
    ```
 
-2. **Install dependencies:**
+2. **Run the startup script:**
+   ```bash
+   run.bat
+   ```
+
+   The `run.bat` script will automatically:
+   - Check for Python 3.14+ (via the Python Launcher)
+   - Create a virtual environment (`.venv/`) if needed
+   - Install dependencies from `requirements.txt`
+   - Launch the application
+
+### Manual Setup (All Platforms)
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/SrcGraph.git
+   cd SrcGraph
+   ```
+
+2. **Create and activate a virtual environment:**
+   ```bash
+   # Windows
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   
+   # Linux/macOS
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the application:**
+4. **Run the application:**
    ```bash
    python main.py
    ```

@@ -12,7 +12,7 @@ class PortTypeSpec:
     canvas_widget_factory: Any = None       # (port, parent) -> QWidget | None
     inspector_widget_factory: Any = None    # (port) -> QWidget | None
     aliases: list[str] = field(default_factory=list)
-    coerce_text: Any = None    # (text: str) -> Any         - text input → native value
+    coerce_text: Any = None    # (text: str) -> Any         - text input -> native value
     validate_text: Any = None  # (text: str) -> str | None  - None = valid, str = error msg
     coerce_value: Any = None   # (value: Any) -> Any        - runtime coercion between nodes
     values_equal: Any = None   # (cur: Any, new_text: str) -> bool - skip-if-same check

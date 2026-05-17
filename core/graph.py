@@ -5,14 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from core.registry import get_default_registry
+from core.registry import get_default_registry, NODE_CLASS_MAPPINGS
 from core.graph_store_registry import get_all_store_specs
 from core.execution import StandardExecutionEngine
 
 if TYPE_CHECKING:
     from .node import BaseNode
     from .execution import ExecutionContext, ExecutionResult
-from nodes import NODE_CLASS_MAPPINGS
 from core.events import (
     EventBus, NodeAddedEvent, NodeRemovedEvent,
     ConnectionAddedEvent, ConnectionRemovedEvent, GraphLoadedEvent,
@@ -244,12 +243,13 @@ class Graph:
             else:
                 _logger.warning(f"Unknown node type '{nd.get('type')}' - skipped")
 
-        # Synchronize dynamic ports for all nodes before processing connections
-        for node in self.nodes.values():
-            node.sync_dynamic_ports()
-
         for cd in data.get("connections", []):
             self.connections.append(Connection.from_dict(cd))
+
+        # Synchronize dynamic ports after connections so numbered slots (item1, item2…)
+        # are created based on actual wiring rather than defaulting to 1 empty slot.
+        for node in self.nodes.values():
+            node.sync_dynamic_ports()
 
         _logger.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
 

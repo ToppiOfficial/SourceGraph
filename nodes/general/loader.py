@@ -193,7 +193,7 @@ class SessionNode(BaseNode):
 
 
 def _handle_variable_drop(scene, pos, value, modifiers) -> bool:
-    from nodes import NODE_CLASS_MAPPINGS
+    from core.registry import NODE_CLASS_MAPPINGS
     cls_name = "VariableInNode" if (modifiers & Qt.AltModifier) else "VariableOutNode"
     cls = NODE_CLASS_MAPPINGS.get(cls_name)
     if not cls:

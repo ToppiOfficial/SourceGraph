@@ -138,6 +138,7 @@ class _BGRenderWorker(QThread):
 
         fbo:      object | None = None
         fbo_size: tuple[int, int] = (0, 0)
+        last_rendered_ver = -1
 
         try:
             while not self._stop:
@@ -149,6 +150,10 @@ class _BGRenderWorker(QThread):
 
                 if w <= 0 or h <= 0:
                     self.msleep(16)
+                    continue
+
+                if ver == last_rendered_ver:
+                    self.msleep(200)
                     continue
 
                 if (w, h) != fbo_size:
@@ -194,6 +199,7 @@ class _BGRenderWorker(QThread):
                     self._frame_ver = ver
                     self._fresh     = True
 
+                last_rendered_ver = ver
                 self.msleep(16)
 
         finally:
@@ -247,10 +253,10 @@ class GridBackgroundRenderer(BackgroundRenderer):
         step_coarse = step_fine * 10.0
 
         self._draw_lines(painter, scene_rect, step_fine,   (1.0 - f) * 0.15, GRID_FINE)
-        self._draw_lines(painter, scene_rect, step_coarse, 0.30,              GRID_COARSE)
+        self._draw_lines(painter, scene_rect, step_coarse, 0.30,              GRID_COARSE, width=1.5)
 
     @staticmethod
-    def _draw_lines(painter: QPainter, rect: QRectF, step: float, alpha: float, color_str: str):
+    def _draw_lines(painter: QPainter, rect: QRectF, step: float, alpha: float, color_str: str, width: float = 1.0):
         if alpha <= 0.01:
             return
         l = math.floor(rect.left()  / step) * step
@@ -263,7 +269,7 @@ class GridBackgroundRenderer(BackgroundRenderer):
         c = QColor(color_str)
         c.setAlphaF(alpha)
         pen = QPen(c)
-        pen.setWidthF(1.0)
+        pen.setWidthF(width)
         pen.setCosmetic(True)
         painter.setPen(pen)
 

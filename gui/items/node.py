@@ -236,6 +236,9 @@ class NodeItem(QGraphicsItem):
         self._output_port_names: list[str]                 = []
         self._proxies:    dict[str, QGraphicsProxyWidget]  = {}
         self._port_widgets: dict[str, QWidget]             = {}
+        # Maps input port name → source Port object when connected, else None.
+        # Populated by _sync_connection_states; avoids graph queries inside paint().
+        self._conn_cache: dict[str, Any | None]            = {}
 
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
@@ -243,6 +246,7 @@ class NodeItem(QGraphicsItem):
         self.setAcceptDrops(True)
 
         self._is_resizing = False
+        self._is_running  = False
         self._fold_press_pos = None  # Track press position in fold indicator area
         node_default_w = getattr(node, 'default_width', None) or DEFAULT_W
         self._w = node.width if node.width is not None else node_default_w
@@ -279,6 +283,10 @@ class NodeItem(QGraphicsItem):
     def on_handle_moved(self, pos: QPointF) -> None:
         self.resize_to(pos.x(), pos.y())
 
+    def set_running(self, v: bool) -> None:
+        self._is_running = v
+        self.update()
+
     def _get_fold_indicator_rect(self) -> QRectF:
         """Get the clickable area for the fold indicator."""
         text_height = self._h if self.node.folded else TITLE_H
@@ -287,7 +295,17 @@ class NodeItem(QGraphicsItem):
 
     def resize_to(self, w: float, h: float = None, lbl_w: float = None) -> None:
         if self.node.folded:
-            return  # resize is blocked while folded; handle is hidden anyway
+            self._w = max(DEFAULT_W, w)
+            self.node.width = self._w
+            self._unfolded_height = h
+            self.node.height = h
+            self.prepareGeometryChange()
+            self._update_ports()
+            sc = self.scene()
+            if sc:
+                sc.refresh_connections(self)
+            self.update()
+            return
         self._is_resizing = True
         self.prepareGeometryChange()
         self._w = max(DEFAULT_W, w)
@@ -583,6 +601,9 @@ class NodeItem(QGraphicsItem):
     # -- event handlers --------------------------------------------------------
 
     def _on_edit_finished(self, port_name: str, edit: QLineEdit) -> None:
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            return
         new_val = edit.text()
         port = self.node.inputs.get(port_name)
         if not port:
@@ -617,11 +638,13 @@ class NodeItem(QGraphicsItem):
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
     def _on_combo_changed(self, port_name: str, combo: QComboBox) -> None:
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            return
         new_val = combo.itemData(combo.currentIndex())
         port = self.node.inputs.get(port_name)
         if not port or port.value == new_val:
             return
-        sc = self.scene()
         if sc:
             sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
 
@@ -841,10 +864,12 @@ class NodeItem(QGraphicsItem):
 
     def _update_port_value(self, port_name: str, new_val: Any):
         """Push a property change command for the given port."""
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            return
         port = self.node.inputs.get(port_name)
         if not port or port.value == new_val:
             return
-        sc = self.scene()
         if sc:
             sc.undo_stack.push(PropertyCommand(self, port_name, port.value, new_val))
 
@@ -868,20 +893,25 @@ class NodeItem(QGraphicsItem):
     
     def _on_bool_toggle(self, port_name: str):
         """Handle boolean toggle clicks."""
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            return
         port = self.node.inputs.get(port_name)
         if not port:
             return
-        
+
         old_val = port.value
         current = str(old_val).lower() in ("true", "1", "yes")
         new_val = not current
-        
-        sc = self.scene()
+
         if sc:
             sc.undo_stack.push(PropertyCommand(self, port_name, old_val, new_val))
 
     def _on_number_increment(self, port_name: str, direction: int):
         """Handle numeric increment/decrement buttons."""
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            return
         port = self.node.inputs.get(port_name)
         if not port:
             return
@@ -991,19 +1021,21 @@ class NodeItem(QGraphicsItem):
         self.update()
 
     def _sync_connection_states(self) -> None:
-        """Syncs port colors and proxy visibility with current graph connections."""
+        """Syncs port colors, proxy visibility, and connection cache with current graph."""
         sc = self.scene()
         if not (sc and hasattr(sc, "graph")):
             return
-            
+        self._conn_cache.clear()
         for pname in self.node.inputs:
             conn = sc.graph.get_input_connection(self.node.id, pname)
             if conn:
                 src_node = sc.graph.nodes.get(conn.src_node)
                 src_port = src_node.outputs.get(conn.src_port) if src_node else None
                 src_type = src_port.port_type if src_port else None
+                self._conn_cache[pname] = src_port  # None if src dropped from graph
                 self.set_port_connected(pname, True, src_type)
             else:
+                self._conn_cache[pname] = None
                 self.set_port_connected(pname, False)
 
     def _update_ports(self) -> None:
@@ -1154,6 +1186,12 @@ class NodeItem(QGraphicsItem):
             painter.drawRoundedRect(body.adjusted(-current_offset, -current_offset, current_offset, current_offset),
                                      r + current_offset, r + current_offset)
 
+        if self._is_running:
+            current_offset += pen_w
+            painter.setPen(QPen(QColor("#f1c40f"), pen_w))
+            painter.drawRoundedRect(body.adjusted(-current_offset, -current_offset, current_offset, current_offset),
+                                     r + current_offset, r + current_offset)
+
         if self.node.error_msg or self._has_required_error():
             current_offset += pen_w
             painter.setPen(QPen(QColor(COLOR_INVALID), pen_w))
@@ -1248,8 +1286,7 @@ class NodeItem(QGraphicsItem):
 
             if full_row:
                 if port.allow_connection:
-                    sc = self.scene()
-                    is_connected = bool(sc and hasattr(sc, "graph") and sc.graph.get_input_connection(self.node.id, name))
+                    is_connected = self._conn_cache.get(name) is not None
                     if is_connected:
                         painter.setPen(label_col)
                         painter.drawText(
@@ -1270,25 +1307,20 @@ class NodeItem(QGraphicsItem):
             )
             # When connected: show the live value text on the right (proxy is hidden)
             if is_editable and not below_flag:
-                sc = self.scene()
-                if sc and hasattr(sc, "graph"):
-                    conn = sc.graph.get_input_connection(self.node.id, name)
-                    if conn:
-                        src_node = sc.graph.nodes.get(conn.src_node)
-                        src_port = src_node.outputs.get(conn.src_port) if src_node else None
-                        if src_port:
-                            val_text = src_port.label or (
-                                str(src_port.value) if src_port.value is not None else ""
-                            )
-                            if val_text:
-                                widget_x = PR + PAD + lbl_w + 2
-                                painter.setPen(value_col)
-                                painter.drawText(
-                                    QRectF(widget_x, row_offset_y,
-                                           self._w - widget_x - PAD, ROW_H),
-                                    Qt.AlignVCenter | Qt.AlignLeft,
-                                    _elide(val_text, 20),
-                                )
+                src_port = self._conn_cache.get(name)
+                if src_port:
+                    val_text = src_port.label or (
+                        str(src_port.value) if src_port.value is not None else ""
+                    )
+                    if val_text:
+                        widget_x = PR + PAD + lbl_w + 2
+                        painter.setPen(value_col)
+                        painter.drawText(
+                            QRectF(widget_x, row_offset_y,
+                                   self._w - widget_x - PAD, ROW_H),
+                            Qt.AlignVCenter | Qt.AlignLeft,
+                            _elide(val_text, 20),
+                        )
             row_offset_y += ROW_H
 
         if self._plugin_source:

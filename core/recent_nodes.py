@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import os
 from typing import List, Type, Any
-from nodes import NODE_CLASS_MAPPINGS
+from core.registry import NODE_CLASS_MAPPINGS
 
 class RecentNodeManager:
     """Manages recently used nodes with persistence."""

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QLi
 from PySide6.QtCore import Qt, QTimer, QSize, QRectF
 from core.node import Port
 from core.recent_nodes import get_recent_nodes
-from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
+from core.registry import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
 from PySide6.QtGui import QColor, QKeyEvent, QPalette, QPainter
 from gui.theme import *
 from core.graph import Graph

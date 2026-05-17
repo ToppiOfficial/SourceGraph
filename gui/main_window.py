@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from core.graph    import Graph
 from gui.node_editor import NodeEditorScene, NodeEditorView, MinimapWidget
 from gui.panels.manager import PanelManager
-from nodes import NODE_CLASS_MAPPINGS
+from core.registry import NODE_CLASS_MAPPINGS
 from gui.theme import *
 from gui.logger import log, Level
 from gui.widgets.basic_shapes import ShapeDrawer, IconColors
@@ -60,13 +60,15 @@ class NavNode:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, on_progress: callable | None = None) -> None:
         super().__init__()
         self.setWindowTitle("SrcGraph")
         self.resize(1280, 800)
         self.setStyleSheet(MAIN_STYLESHEET)
+        self._on_progress = on_progress
 
         self._setup_crash_reporting()
+        self._progress("Initializing core…", 20)
 
         self.graph = Graph()
         self.graph.project_dir = None
@@ -75,6 +77,7 @@ class MainWindow(QMainWindow):
         self.view  = NodeEditorView(self.scene)
         self._nav_root = NavNode("", self.graph, self.scene)
         self._current_nav = self._nav_root
+        self._progress("Starting renderer…", 30)
 
         # Set up node registry for undo/redo deserialization
         self._setup_undo_registry()
@@ -93,6 +96,7 @@ class MainWindow(QMainWindow):
         self._recent_files = []
         self._dirty = False
         self._is_switching = False
+        self._is_executing = False
         self._disabled_plugins: set[str] = set()
 
         # Settings
@@ -104,11 +108,13 @@ class MainWindow(QMainWindow):
         
         # Initialize Panel System
         self.panel_manager = PanelManager(self)
+        self._progress("Loading panels…", 40)
         self.panel_manager.discover_and_load()
-        
+
         # Update window title
         self._update_window_title()
         self._setup_view_overlays()
+        self._progress("Setting up panels…", 55)
         self.panel_manager.initialize_all()
         self._apply_initial_layout()
 
@@ -116,12 +122,21 @@ class MainWindow(QMainWindow):
         self._update_status_right()
         self.scene.graph_changed.connect(self._on_changed)
 
+        self._progress("Loading plugins…", 65)
         self._install_plugin_packages()
+        self._progress("Initializing plugins…", 75)
         self._load_plugins()
         self.panel_manager.load_and_setup_plugin_panels()
 
+        exec_p = self.panel_manager.get_widget("ExecutionDock")
+        if exec_p:
+            exec_p.execution_started.connect(lambda _n: self._on_execution_lock(True))
+            exec_p.execution_finished.connect(lambda _n, _r: self._on_execution_lock(False))
+
         default_ws = self._get_default_workspace_path()
+        self._progress("Restoring workspace…", 85)
         self._load_layout(default_ws)
+        self._progress("Opening project…", 95)
         self._load_config()
 
         # Command-line arguments override the workspace's last project (e.g., from reload)
@@ -132,7 +147,12 @@ class MainWindow(QMainWindow):
                 self._current_nav = None
                 self._load_file(arg_path)
 
-    #  toolbar 
+    def _progress(self, message: str, percent: int) -> None:
+        """Emit progress update to splash screen."""
+        if self._on_progress:
+            self._on_progress(message, percent)
+
+    #  toolbar
 
     def get_external_state(self) -> dict:
         exec_p = self.panel_manager.get_widget("ExecutionDock")
@@ -350,25 +370,42 @@ class MainWindow(QMainWindow):
         log.info(f"Title display: {'full path' if self._show_full_path_in_title else 'filename only'}")
 
     def _setup_shortcuts(self) -> None:
-        undo_act = QAction("Undo", self)
-        undo_act.setShortcut(QKeySequence.Undo)
-        undo_act.setShortcutContext(Qt.WindowShortcut)
-        undo_act.triggered.connect(self._on_undo)
-        self.addAction(undo_act)
+        self._undo_act = QAction("Undo", self)
+        self._undo_act.setShortcut(QKeySequence.Undo)
+        self._undo_act.setShortcutContext(Qt.WindowShortcut)
+        self._undo_act.triggered.connect(self._on_undo)
+        self.addAction(self._undo_act)
 
-        redo_act = QAction("Redo", self)
-        redo_act.setShortcut(QKeySequence("Ctrl+Shift+Z"))
-        redo_act.setShortcutContext(Qt.WindowShortcut)
-        redo_act.triggered.connect(self._on_redo)
-        self.addAction(redo_act)
+        self._redo_act = QAction("Redo", self)
+        self._redo_act.setShortcut(QKeySequence("Ctrl+Shift+Z"))
+        self._redo_act.setShortcutContext(Qt.WindowShortcut)
+        self._redo_act.triggered.connect(self._on_redo)
+        self.addAction(self._redo_act)
 
     def _on_undo(self) -> None:
+        if self._is_executing:
+            return
         if self.scene:
             self.scene.undo_stack.undo()
 
     def _on_redo(self) -> None:
+        if self._is_executing:
+            return
         if self.scene:
             self.scene.undo_stack.redo()
+
+    def _on_execution_lock(self, locked: bool) -> None:
+        self._is_executing = locked
+        self._undo_act.setEnabled(not locked)
+        self._redo_act.setEnabled(not locked)
+        self.panel_manager.notify_execution_lock(locked)
+
+    def _guard_execution(self, action: str = "this action") -> bool:
+        if self._is_executing:
+            QMessageBox.warning(self, "Execution Running",
+                f"Cannot perform '{action}' while the graph is executing.")
+            return True
+        return False
 
     def _setup_view_overlays(self) -> None:
         """Setup docking options and non-docking overlays like the Minimap."""
@@ -717,13 +754,28 @@ class MainWindow(QMainWindow):
         self.zoom_val_btn.setText(f"{zoom:.0f}%")
 
     def closeEvent(self, event) -> None:
+        if self._is_executing:
+            reply = QMessageBox.warning(
+                self, "Execution Running",
+                "A graph is currently executing. Force quit anyway?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+            exec_w = self.panel_manager.get_widget("ExecutionDock")
+            if exec_w and hasattr(exec_w, "teardown"):
+                exec_w.teardown()
+
         if self._maybe_save():
+            exec_w = self.panel_manager.get_widget("ExecutionDock")
+            if exec_w and hasattr(exec_w, "teardown"):
+                exec_w.teardown()
             # Save layout to autosave location
             autosave_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "workspace", "autosave.json")
             self._save_layout(autosave_path)
             # Save application config
             self._save_config()
-            
+
             self._cleanup_crash_reporting()
             event.accept()
         else:
@@ -953,6 +1005,7 @@ class MainWindow(QMainWindow):
                     self._reload()
 
     def _new(self) -> None:
+        if self._guard_execution("New File"): return
         if not self._maybe_save(): return
         self._nav_root = None
         self._current_nav = None
@@ -1070,6 +1123,8 @@ class MainWindow(QMainWindow):
 
     def _switch_to_context(self, nav_node: NavNode):
         """Swaps the active scene/graph without re-loading from disk if possible."""
+        if self._is_executing:
+            return
         if self._is_switching:
             return
         self._is_switching = True
@@ -1086,6 +1141,21 @@ class MainWindow(QMainWindow):
                 except: pass
                 
                 if self.graph: self.graph.view_state = self.view.get_view_state() # Save old view state
+
+                # Auto-save subgraph on navigate-away so the parent SubgraphNode
+                # reads a consistent file when it refreshes.
+                if (self._current_nav is not None
+                        and self._current_nav is not self._nav_root
+                        and self._current_nav.path
+                        and self._current_nav.graph._is_dirty):
+                    try:
+                        Path(self._current_nav.path).write_text(
+                            json.dumps(self._current_nav.graph.to_dict(), indent=2),
+                            encoding="utf-8",
+                        )
+                        self._current_nav.graph._is_dirty = False
+                    except Exception as e:
+                        log.error(f"Auto-save subgraph failed: {e}")
 
             self.graph = nav_node.graph
             self.scene = nav_node.scene
@@ -1206,6 +1276,7 @@ class MainWindow(QMainWindow):
             return False
 
     def _open(self) -> None:
+        if self._guard_execution("Open File"): return
         if not self._maybe_save(): return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Graph", "", "SrcGraph Files (*.srcgraph *.srcsubgraph);;All (*)")

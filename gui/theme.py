@@ -513,6 +513,31 @@ NOTIFICATION_STYLE = f"""
     }}
 """
 
+# -- Splash Screen Styles ------------------------------------------------------
+SPLASH_BG_STYLE = f"""
+    #SplashContainer {{
+        background-color: {BG_DARKER};
+        border: 1px solid {BORDER_LIGHT};
+        border-radius: 12px;
+    }}
+"""
+
+SPLASH_PROGRESS_STYLE = f"""
+    QProgressBar {{
+        background-color: {BG_DARK};
+        border: 1px solid {BORDER_MED};
+        border-radius: 6px;
+        text-align: center;
+        color: transparent;
+        height: 10px;
+    }}
+    QProgressBar::chunk {{
+        background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+            stop:0 {ACCENT}, stop:1 #4fa8c2);
+        border-radius: 5px;
+    }}
+"""
+
 # -- Preview Panel Styles ------------------------------------------------------
 PREVIEW_SCROLL_STYLE = f"""
     QScrollArea {{ background: transparent; border: none; }}

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from core.node import BaseNode, Port, parse_type, In, Out
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
 from core.file_picker_registry import get_file_picker
-from nodes import NODE_CLASS_MAPPINGS
+from core.registry import NODE_CLASS_MAPPINGS
 from gui.widgets.node_widgets import make_file_picker
 from gui.logger import log
 
@@ -51,11 +51,17 @@ class SubgraphNode(BaseNode):
             resolved_out_names = {}
 
             for nd in data.get("nodes", []):
-                pname = nd.get("values", {}).get("port_name", "")
+                nd_type = nd.get("type", "")
+                if nd_type not in ("SubgraphInputNode", "SubgraphOutputNode"):
+                    continue
+
+                default_pname = "input" if nd_type == "SubgraphInputNode" else "output"
+                pname = nd.get("values", {}).get("port_name", default_pname)
+
                 if not pname:
                     continue
-                    
-                if nd["type"] == "SubgraphInputNode":
+
+                if nd_type == "SubgraphInputNode":
                     # Track input name conflicts
                     if pname not in in_name_counts:
                         in_name_counts[pname] = 0
@@ -73,7 +79,7 @@ class SubgraphNode(BaseNode):
                         p = Port(name=resolved_name, is_input=True, port_type="any", node_id=self.id)
                         self.inputs[resolved_name] = p
                         
-                elif nd["type"] == "SubgraphOutputNode":
+                elif nd_type == "SubgraphOutputNode":
                     # Track output name conflicts
                     if pname not in out_name_counts:
                         out_name_counts[pname] = 0
@@ -107,39 +113,22 @@ class SubgraphNode(BaseNode):
         except Exception as e:
             print(f"[SubgraphNode] sync error: {e}")
 
-    def _detect_output_type(self, data: dict, output_node_id: str) -> PortType:
+    def _detect_output_type(self, data: dict, output_node_id: str) -> str:
         """Detect the actual output type by analyzing connections to the SubgraphOutputNode."""
-        
-        # Find connections to this SubgraphOutputNode's "value" input
         for conn in data.get("connections", []):
             if conn["dst_node"] == output_node_id and conn["dst_port"] == "value":
                 src_node_id = conn["src_node"]
                 src_port = conn["src_port"]
-                
-                # Find the source node
+
                 for nd in data.get("nodes", []):
                     if nd["id"] == src_node_id:
-                        # Get the source node's class to determine its output types
                         node_class = NODE_CLASS_MAPPINGS.get(nd["type"])
                         if node_class:
-                            # Check if the node has RETURN_TYPES defined
-                            if hasattr(node_class, 'RETURN_TYPES') and node_class.RETURN_TYPES:
-                                # Find the index of the source port
-                                if hasattr(node_class, 'RETURN_NAMES'):
-                                    return_names = list(node_class.RETURN_NAMES)
-                                    if src_port in return_names:
-                                        idx = return_names.index(src_port)
-                                        if idx < len(node_class.RETURN_TYPES):
-                                            type_spec = node_class.RETURN_TYPES[idx]
-                                            return parse_type(type_spec)
-                                else:
-                                    # If no RETURN_NAMES, assume first output
-                                    if node_class.RETURN_TYPES:
-                                        type_spec = node_class.RETURN_TYPES[0]
-                                        return parse_type(type_spec)
+                            for entry in getattr(node_class, '_port_entries', []):
+                                if not entry.is_input and entry.name == src_port:
+                                    return parse_type(entry.type_str)
                         break
-        
-        # Default to ANY if we can't determine the type
+
         return "any"
 
     def create_widget_for_port(self, port):

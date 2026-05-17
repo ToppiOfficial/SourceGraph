@@ -33,7 +33,7 @@ from core.commands import (
 from core.recent_nodes import add_recent_node
 from gui.widgets.icon_provider import load_pixmap
 from gui.widgets.safe_graphics_view import SafeGraphicsView
-from nodes import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
+from core.registry import NODE_CLASS_MAPPINGS, NODE_CATEGORIES
 from nodes.subgraph.subgraph import SubgraphNode, SubgraphInputNode, SubgraphOutputNode
 from gui.items.node       import NodeItem, ResizeHandle, PortItem, DEFAULT_W
 from gui.commands         import PropertyCommand, FoldCommand, ResizeNodeCommand
@@ -345,8 +345,15 @@ class ContextMenuFactory:
         elif action == rename_act:
             scene._start_rename(item)
         elif action == resize_act:
-            default_h = item._calculate_height()
-            cmd = ResizeNodeCommand(item, item._w, item._h, DEFAULT_W, default_h)
+            if item.node.folded:
+                item.node.folded = False
+                default_h = item._calculate_height()
+                item.node.folded = True
+                old_h = item._unfolded_height
+            else:
+                default_h = item._calculate_height()
+                old_h = item._h
+            cmd = ResizeNodeCommand(item, item._w, old_h, DEFAULT_W, default_h)
             scene._undo_manager.undo_stack.push(cmd)
         elif action == convert_act:
             targets = [i for i in scene.selectedItems() if isinstance(i, NodeItem)]
@@ -427,6 +434,9 @@ class MinimapWidget(QWidget):
         self.view              = view
         self.setMouseTracking(True)
         self.setMinimumSize(100, 80)
+        # Cache QPainterPath per connection; only rebuild when endpoints/style change.
+        self._conn_path_cache:     dict[tuple, QPainterPath] = {}
+        self._conn_endpoint_cache: dict[tuple, tuple]        = {}
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -474,6 +484,7 @@ class MinimapWidget(QWidget):
 
         if self.show_links:
             painter.setPen(QPen(QColor(100, 100, 100, 150), 2.0 / scale))
+            wire_style = ConnectionItem.wire_style
             for conn, ci in scene._conn_items:
                 if ci.isVisible():
                     src_ni = scene._node_items.get(conn.src_node)
@@ -484,18 +495,23 @@ class MinimapWidget(QWidget):
                         if sp and dp:
                             s = sp.scene_center()
                             e = dp.scene_center()
-                            path = QPainterPath(s)
-                            if ConnectionItem.wire_style == "linear":
-                                path.lineTo(e)
-                            elif ConnectionItem.wire_style == "straight":
-                                mx = s.x() + (e.x() - s.x()) * 0.5
-                                path.lineTo(mx, s.y())
-                                path.lineTo(mx, e.y())
-                                path.lineTo(e)
-                            else:
-                                dx = max(abs(e.x() - s.x()) * 0.5, 60.0)
-                                path.cubicTo(s + QPointF(dx, 0), e - QPointF(dx, 0), e)
-                            painter.drawPath(path)
+                            cache_key = (conn.src_node, conn.src_port, conn.dst_node, conn.dst_port)
+                            endpoints  = (s.x(), s.y(), e.x(), e.y(), wire_style)
+                            if self._conn_endpoint_cache.get(cache_key) != endpoints:
+                                path = QPainterPath(s)
+                                if wire_style == "linear":
+                                    path.lineTo(e)
+                                elif wire_style == "straight":
+                                    mx = s.x() + (e.x() - s.x()) * 0.5
+                                    path.lineTo(mx, s.y())
+                                    path.lineTo(mx, e.y())
+                                    path.lineTo(e)
+                                else:
+                                    dx = max(abs(e.x() - s.x()) * 0.5, 60.0)
+                                    path.cubicTo(s + QPointF(dx, 0), e - QPointF(dx, 0), e)
+                                self._conn_path_cache[cache_key]     = path
+                                self._conn_endpoint_cache[cache_key] = endpoints
+                            painter.drawPath(self._conn_path_cache[cache_key])
 
         painter.setPen(Qt.NoPen)
         for n in nodes:
@@ -618,11 +634,29 @@ class NodeEditorScene(QGraphicsScene):
         self._flushing:     bool                                    = False
 
         # Internal drag / move state
-        self._wire_drag   = WireDragState()
+        self._wire_drag    = WireDragState()
         self._move_tracker = SelectionMoveTracker()
+
+        # Throttle wire-drag redraws to ~60 fps; avoids Bezier recalc on every
+        # raw mouseMoveEvent which can fire at 200+ Hz on high-DPI displays.
+        self._drag_timer       = QTimer(self)
+        self._drag_timer.setInterval(16)
+        self._drag_timer.timeout.connect(self._flush_wire_drag)
+        self._pending_drag_pos: QPointF | None = None
+
+        # Execution lock - blocks all graph-mutation interactions while True
+        self._execution_locked: bool = False
 
         self.setSceneRect(-4000, -4000, 8000, 8000)
         self._subscribe_to_bus()
+
+    def set_execution_lock(self, locked: bool) -> None:
+        self._execution_locked = locked
+        if locked:
+            if self._wire_drag.active():
+                self._wire_drag.clear(self)
+            self._move_tracker.clear()
+        self.update()
 
     # -- external state (used by main_window for view-state round-trips) -------
 
@@ -744,6 +778,10 @@ class NodeEditorScene(QGraphicsScene):
                 except RuntimeError:
                     pass
                 self._conn_items.remove(pair)
+                # Invalidate destination node's paint cache for this port
+                dst_ni = self._node_items.get(e.dst_node)
+                if dst_ni and e.dst_port in dst_ni._conn_cache:
+                    dst_ni._conn_cache[e.dst_port] = None
                 break
         self.graph_changed.emit()
 
@@ -996,6 +1034,7 @@ class NodeEditorScene(QGraphicsScene):
         self._conn_items.append((conn, ci))
         self.addItem(ci)
         dst_ni.set_port_connected(conn.dst_port, True, sp.port.port_type)
+        dst_ni._conn_cache[conn.dst_port] = sp.port  # keep paint cache in sync
         return ci
 
     def refresh_connections(self, node_item: NodeItem) -> None:
@@ -1056,6 +1095,9 @@ class NodeEditorScene(QGraphicsScene):
 
     def mousePressEvent(self, event) -> None:
         if self.graph is None:
+            event.ignore()
+            return
+        if self._execution_locked:
             event.ignore()
             return
 
@@ -1126,22 +1168,42 @@ class NodeEditorScene(QGraphicsScene):
                 wd.drag_conn.set_drag_status(None)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._execution_locked:
+            event.ignore()
+            return
         wd = self._wire_drag
         if wd.active():
+            self._pending_drag_pos = event.scenePos()
+            if not self._drag_timer.isActive():
+                self._drag_timer.start()
+            return
+        super().mouseMoveEvent(event)
+
+    def _flush_wire_drag(self) -> None:
+        """Timer callback: apply the latest buffered drag position."""
+        wd  = self._wire_drag
+        pos = self._pending_drag_pos
+        if pos is not None and wd.active():
+            self._pending_drag_pos = None
             try:
-                wd.drag_conn.set_dst(event.scenePos())
-                self._update_wire_hover(event.scenePos())
-                return
+                wd.drag_conn.set_dst(pos)
+                self._update_wire_hover(pos)
             except RuntimeError:
                 wd.drag_conn = None
-        super().mouseMoveEvent(event)
+        else:
+            self._drag_timer.stop()
 
     def mouseReleaseEvent(self, event) -> None:
         if self.graph is None:
             event.ignore()
             return
+        if self._execution_locked:
+            event.ignore()
+            return
 
         self._move_tracker.commit(self)
+        self._drag_timer.stop()
+        self._pending_drag_pos = None
 
         wd = self._wire_drag
         if wd.active() and wd.drag_port:
@@ -1225,6 +1287,8 @@ class NodeEditorScene(QGraphicsScene):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._execution_locked:
+            return
         if event.key() == Qt.Key_Delete:
             self.remove_selected()
         elif event.key() == Qt.Key_Escape:
@@ -1283,7 +1347,7 @@ class NodeEditorView(SafeGraphicsView):
         self._bg_color   = QColor(BG_DARKER)
 
         # Pluggable background renderer
-        self._bg_renderer: BackgroundRenderer = ModernGLBackgroundRenderer()
+        self._bg_renderer: BackgroundRenderer = GridBackgroundRenderer()
 
         # Rubber-band mode tracking
         self._rb_mode:          RubberBandMode = RubberBandMode.REPLACE
@@ -1466,6 +1530,9 @@ class NodeEditorView(SafeGraphicsView):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if getattr(self.scene(), "_execution_locked", False):
+            event.ignore()
+            return
         text      = event.mimeData().text()
         scene_pos = self.mapToScene(event.position().toPoint())
         items_to_process = []
@@ -1518,6 +1585,11 @@ class NodeEditorView(SafeGraphicsView):
             self._panning   = True
             self._pan_start = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
+            return
+
+        sc = self.scene()
+        if sc and getattr(sc, "_execution_locked", False):
+            event.ignore()
             return
 
         if event.button() == Qt.LeftButton:
@@ -1588,6 +1660,9 @@ class NodeEditorView(SafeGraphicsView):
         if not self.is_ready_for_events():
             event.ignore()
             return
+        if getattr(self.scene(), "_execution_locked", False):
+            event.ignore()
+            return
 
         item = self.itemAt(event.pos())
         if isinstance(item, NodeItem) and isinstance(item.node, SubgraphNode):
@@ -1607,6 +1682,8 @@ class NodeEditorView(SafeGraphicsView):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if not self.is_ready_for_events():
+            return
+        if getattr(self.scene(), "_execution_locked", False):
             return
 
         focus_widget  = QApplication.focusWidget()
@@ -1628,6 +1705,8 @@ class NodeEditorView(SafeGraphicsView):
     # -- context menu ----------------------------------------------------------
 
     def contextMenuEvent(self, event) -> None:
+        if getattr(self.scene(), "_execution_locked", False):
+            return
         item = self.itemAt(event.pos())
         if isinstance(item, PortItem):
             if item.port.is_input:

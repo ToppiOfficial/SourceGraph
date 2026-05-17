@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QMenu,
 )
-from PySide6.QtCore import Qt, QMimeData
+from PySide6.QtCore import Qt, QMimeData, Signal
 from PySide6.QtGui import QColor, QFont
 
 from gui.widgets.basic_shapes import ShapeDrawer
@@ -19,6 +19,8 @@ from gui.panels.base_browser import BaseBrowserWidget, BaseBrowserTree
 
 
 class AssetTreeWidget(BaseBrowserTree):
+    os_files_dropped = Signal(list, object)  # (paths: list[str], target: QTreeWidgetItem | None)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setColumnCount(3)
@@ -27,7 +29,28 @@ class AssetTreeWidget(BaseBrowserTree):
         self.header().setSectionResizeMode(2, QHeaderView.Stretch)
         self.setStyleSheet(TREE_STYLE)
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
     def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+            if paths:
+                target = self.itemAt(event.position().toPoint())
+                if target and target.data(0, self._T) == "asset":
+                    target = target.parent()
+                self.os_files_dropped.emit(paths, target)
+                event.acceptProposedAction()
+            return
         super().dropEvent(event)
         self._refresh_folder_spans()
 
@@ -117,6 +140,7 @@ class AssetBrowserWidget(BaseBrowserWidget):
     def _setup_connections(self):
         self.tree_widget.deleteRequested.connect(self._on_delete)
         self.tree_widget.hierarchyChanged.connect(self._on_hierarchy_changed)
+        self.tree_widget.os_files_dropped.connect(self._on_os_files_dropped)
 
     def _do_refresh(self):
         layout = self.main_window.graph.get_ext_store("asset_layout")
@@ -211,6 +235,16 @@ class AssetBrowserWidget(BaseBrowserWidget):
                 item.setToolTip(0, path)
 
     # -- handlers -------------------------------------------------------------
+
+    def _on_os_files_dropped(self, paths: list, target_item):
+        existing = set(self.tree_widget.all_paths())
+        new_paths = [p for p in paths if p and p not in existing]
+        if not new_paths:
+            return
+        with self.main_window.scene._undo_manager.transaction("Import Dropped Files"):
+            for p in new_paths:
+                self.tree_widget.add_asset(p, target_item)
+            self._sync_to_graph()
 
     def _on_import(self):
         files, _ = QFileDialog.getOpenFileNames(

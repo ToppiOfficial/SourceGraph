@@ -42,3 +42,13 @@ class BasePanel(QDockWidget):
     def update_context(self, graph, scene) -> None:
         """Called when the active graph/scene changes (e.g. breadcrumb navigation)."""
         pass
+
+    def on_execution_lock(self, locked: bool) -> None:
+        """Called when execution starts (locked=True) or finishes (locked=False).
+        Override in plugin panels to block/unblock panel-specific interactions."""
+        pass
+
+    @property
+    def is_executing(self) -> bool:
+        """Returns True if the graph engine is currently running."""
+        return getattr(self.main_window, "_is_executing", False)

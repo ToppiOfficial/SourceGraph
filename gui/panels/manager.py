@@ -92,3 +92,11 @@ class PanelManager:
         """Propagate graph/scene changes to all panels."""
         for panel in self.panels.values():
             panel.update_context(graph, scene)
+
+    def notify_execution_lock(self, locked: bool) -> None:
+        """Broadcast execution lock state to all panels (opt-in via on_execution_lock)."""
+        for panel in self.panels.values():
+            try:
+                panel.on_execution_lock(locked)
+            except Exception:
+                pass

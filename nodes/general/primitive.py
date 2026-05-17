@@ -116,7 +116,6 @@ class PrintNode(BaseNode):
     def execute(self, value=None, **kwargs):
         self._output_buffer.clear()
         self._output_buffer.append(f"{value}")
-        self.sync_presentation()
         return (value,)
 
     def sync_presentation(self) -> None:

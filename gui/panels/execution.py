@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import copy
 from contextlib import nullcontext
 from typing import Any
@@ -9,7 +10,7 @@ from PySide6.QtWidgets import (
     QMenu, QAbstractItemView, QCheckBox, QLineEdit,
     QDialog, QFormLayout, QDialogButtonBox, QApplication,
 )
-from PySide6.QtCore import Qt, Signal, QSize, QTimer, QEvent
+from PySide6.QtCore import Qt, Signal, QSize, QTimer, QEvent, QThread, QMutex, QMutexLocker, Slot, QObject
 from PySide6.QtGui import QAction, QKeyEvent, QFont, QIcon, QPixmap, QPainter, QColor, QMouseEvent
 
 from gui.panels.base_panel import BasePanel
@@ -363,11 +364,92 @@ class _SessionItemsProvider:
         port.value = f"{matches[0]}|{node_id}" if len(matches) == 1 else ""
 
 
+class ExecutionWorker(QObject):
+    """Runs the execution loop on a background QThread."""
+
+    node_started     = Signal(str, str)         # node_id, title
+    node_completed   = Signal(str, object)      # node_id, ExecutionResult
+    node_errored     = Signal(str, str)         # node_id, error_msg
+    session_finished = Signal(str, dict, bool, float, object)  # name, results, any_failed, elapsed_s, failed_ids
+    session_error    = Signal(str)              # unhandled exception message
+
+    def __init__(self):
+        super().__init__()
+        self._cancel = False
+        self._mutex  = QMutex()
+        # Reuse one event loop across all sessions so the thread pool is
+        # kept warm and thread-creation overhead doesn't hit every execution.
+        self._loop   = asyncio.new_event_loop()
+
+    def request_cancel(self):
+        with QMutexLocker(self._mutex):
+            self._cancel = True
+
+    def _is_cancelled(self) -> bool:
+        with QMutexLocker(self._mutex):
+            return self._cancel
+
+    @Slot(object)
+    def run_session(self, data: dict):
+        import time as _time
+        from core.execution import AsyncExecutionEngine, ExecutionContext
+        
+        with QMutexLocker(self._mutex):
+            self._cancel = False
+
+        session_name = data["session_name"]
+        node_ids     = data["node_ids"]
+        graph        = data["graph"]
+        session      = data["session"]
+
+        async def run():
+            engine = AsyncExecutionEngine()
+            context = ExecutionContext(
+                on_node_start    = lambda nid, title: self.node_started.emit(nid, title),
+                on_node_complete = lambda nid, res:   self.node_completed.emit(nid, res),
+                on_node_error    = lambda nid, msg:   self.node_errored.emit(nid, msg),
+            )
+            
+            # execute_subset handles the dependency logic and concurrency
+            results_dict = await engine.execute_subset(
+                graph, node_ids, context, 
+                is_cancelled=self._is_cancelled
+            )
+            
+            any_failed = any(not r.success for r in results_dict.values())
+            failed_ids = {nid for nid, r in results_dict.items() if not r.success and nid in node_ids}
+            
+            # Update session results with only successfully executed session targets
+            ui_results = {}
+            for nid in node_ids:
+                r = results_dict.get(nid)
+                if r and r.success:
+                    ui_results[nid] = r.outputs
+                    session.results[nid] = r.outputs
+                    
+            return ui_results, any_failed, failed_ids
+
+        try:
+            start = _time.perf_counter()
+            # run_until_complete reuses the persistent loop so the thread pool
+            # stays warm between sessions (avoids per-session thread-creation cost).
+            ui_results, any_failed, failed_ids = self._loop.run_until_complete(run())
+            elapsed = _time.perf_counter() - start
+            
+            self.session_finished.emit(session_name, ui_results, any_failed, elapsed, failed_ids)
+
+        except asyncio.CancelledError:
+            self.session_finished.emit(session_name, {}, True, _time.perf_counter() - start, set())
+        except Exception as e:
+            self.session_error.emit(str(e))
+
+
 class ExecutionPanel(QWidget):
     """Panel for managing execution sessions."""
 
-    execution_started = Signal(str)  # session_name
-    execution_finished = Signal(str, dict)  # session_name, results
+    execution_started  = Signal(str)          # session_name
+    execution_finished = Signal(str, dict)    # session_name, results
+    _trigger_worker    = Signal(object)       # fires ExecutionWorker.run_session cross-thread
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -381,6 +463,21 @@ class ExecutionPanel(QWidget):
         self._last_failed_node_id: str | None = None
         self._failed_session_items: set[str] = set()
         self._session_rename_original_name: str | None = None
+        self._is_executing: bool = False
+        self._volatile_backup: dict = {}
+
+        # Background execution thread
+        self._worker_thread = QThread()
+        self._worker_thread.setObjectName("ExecutionWorkerThread")
+        self._worker = ExecutionWorker()
+        self._worker.moveToThread(self._worker_thread)
+        self._trigger_worker.connect(self._worker.run_session)
+        self._worker.node_started.connect(self._on_node_started)
+        self._worker.node_completed.connect(self._on_node_completed)
+        self._worker.node_errored.connect(self._on_node_errored)
+        self._worker.session_finished.connect(self._post_execute_ui)
+        self._worker.session_error.connect(self._on_session_error)
+        self._worker_thread.start()
 
         self._setup_ui()
         register_enum_provider("session_items", _SessionItemsProvider())
@@ -461,11 +558,19 @@ class ExecutionPanel(QWidget):
         layout.addWidget(QLabel("Execution Order:"))
         layout.addWidget(self.node_list)
         
-        # Execute button
+        # Execute / Cancel button row
+        exec_row = QHBoxLayout()
         self.btn_execute = QPushButton("Execute")
         self.btn_execute.setStyleSheet(BTN_STYLE)
         self.btn_execute.clicked.connect(self._execute_current)
-        layout.addWidget(self.btn_execute)
+        exec_row.addWidget(self.btn_execute)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setStyleSheet(BTN_STYLE)
+        self.btn_cancel.clicked.connect(self._cancel_execution)
+        self.btn_cancel.setVisible(False)
+        exec_row.addWidget(self.btn_cancel)
+        layout.addLayout(exec_row)
         
         # Create default session
         self._new_session("default")
@@ -903,126 +1008,139 @@ class ExecutionPanel(QWidget):
         self._execute_session(temp_session)
             
     def _execute_session(self, session: ExecutionSession):
-        print(f"--- Executing: {session.name} ---")
-        self.execution_started.emit(session.name)
-
+        if self._is_executing:
+            return
         if not session.node_ids:
             print("No nodes in session")
             return
 
-        start_total = time.perf_counter()
-        volatile_backup: dict[str, Any] = {}
-        for spec in get_volatile_store_specs():
-            volatile_backup.update(spec.dump(self.graph))
-        volatile_backup = copy.deepcopy(volatile_backup)
-        any_failed = False
+        # Deep-copy volatile state before handing graph to worker
+        self._volatile_backup = copy.deepcopy(
+            {k: v for spec in get_volatile_store_specs()
+             for k, v in spec.dump(self.graph).items()}
+        )
+        session.results = {}
+
+        self._pre_execute_ui(session.name)
+        self._trigger_worker.emit({
+            "session_name":    session.name,
+            "node_ids":        list(session.node_ids),
+            "graph":           self.graph,
+            "time_unit":       getattr(self.graph, "time_unit", "ms"),
+            "session":         session,
+        })
+
+    def _pre_execute_ui(self, session_name: str) -> None:
+        self._is_executing = True
+        for i in range(self.node_list.count()):
+            list_item = self.node_list.item(i)
+            if list_item:
+                w = self.node_list.itemWidget(list_item)
+                if w:
+                    w.set_error_highlight(False)
+        self.btn_execute.setEnabled(False)
+        self.btn_cancel.setVisible(True)
+        if self._scene:
+            self._scene.set_execution_lock(True)
+        self.execution_started.emit(session_name)
+        print(f"--- Executing: {session_name} ---")
+
+    @Slot(str, dict, bool, float, object)
+    def _post_execute_ui(self, session_name: str, results: dict, any_failed: bool,
+                         elapsed: float, failed_ids: object) -> None:
+        self._is_executing = False
+
+        self.graph._state.ext_stores.update(self._volatile_backup)
+        self._volatile_backup = {}
+
+        time_unit = getattr(self.graph, "time_unit", "ms")
+        disp_time = elapsed * 1000 if time_unit == "ms" else elapsed
+        msg = (f"Execution complete with errors in {disp_time:.4f}{time_unit}"
+               if any_failed else
+               f"Execution complete in {disp_time:.4f}{time_unit}")
+        print(msg)
+        print(f"--- {session_name} complete ---")
+
+        if self._scene and self._scene.views():
+            self._scene.views()[0].show_notification(msg, is_error=any_failed)
+
+        self._failed_session_items = set(failed_ids)
+        for failed_id in self._failed_session_items:
+            self._highlight_failed_item(failed_id)
+        self._failed_session_items.clear()
+
+        self.refresh()
+        if self._scene:
+            self._scene.set_execution_lock(False)
+            self._scene.update()
+
+        self.execution_finished.emit(session_name, results)
 
         try:
-            # Clear previous error highlights
-            for i in range(self.node_list.count()):
-                list_item = self.node_list.item(i)
-                if list_item:
-                    w = self.node_list.itemWidget(list_item)
-                    if w:
-                        w.set_error_highlight(False)
+            for w in QApplication.topLevelWidgets():
+                if hasattr(w, "panel_manager"):
+                    gmp = w.panel_manager.get_panel("GraphMapDock")
+                    if gmp and hasattr(gmp, "update_execution_errors"):
+                        gmp.update_execution_errors()
+                    break
+        except Exception:
+            pass
 
-            engine = StandardExecutionEngine()
-            # Successful results shared across items (cache deps that already ran OK)
-            global_ok: dict[str, ExecutionResult] = {}
-            session.results = {}
+        self.btn_execute.setEnabled(True)
+        self.btn_cancel.setVisible(False)
 
-            def on_error(nid, msg):
-                node = self.graph.nodes.get(nid)
-                log.error(f"[{node.title if node else nid}] {msg}")
-                if self._scene:
-                    scene_item = self._scene._node_items.get(nid)
-                    if scene_item:
-                        scene_item.update()
+    @Slot(str)
+    def _on_session_error(self, error_msg: str) -> None:
+        self._is_executing = False
+        log.error(f"Execution Error: {error_msg}")
+        if self._scene and self._scene.views():
+            self._scene.views()[0].show_notification(f"Execution Error: {error_msg}", is_error=True)
+        if self._scene:
+            self._scene.set_execution_lock(False)
+        self.graph._state.ext_stores.update(self._volatile_backup)
+        self._volatile_backup = {}
+        self.btn_execute.setEnabled(True)
+        self.btn_cancel.setVisible(False)
 
-            context = ExecutionContext(on_node_error=on_error)
+    @Slot(str, str)
+    def _on_node_started(self, nid: str, title: str) -> None:
+        if self._scene:
+            item = self._scene._node_items.get(nid)
+            if item:
+                item.set_running(True)
 
-            for session_item_id in session.node_ids:
-                item_node = self.graph.nodes.get(session_item_id)
-                if item_node is None:
-                    continue
+    @Slot(str, object)
+    def _on_node_completed(self, nid: str, result) -> None:
+        if self.graph:
+            node = self.graph.nodes.get(nid)
+            if node:
+                node.sync_presentation()
+        if self._scene:
+            item = self._scene._node_items.get(nid)
+            if item:
+                item.set_running(False)
+                item.update()
 
-                # Collect and sort this item's full dependency subtree
-                item_deps = self._collect_with_deps([session_item_id])
-                sorted_deps = self._sort_by_deps(item_deps)
+    @Slot(str, str)
+    def _on_node_errored(self, nid: str, msg: str) -> None:
+        if self.graph:
+            node = self.graph.nodes.get(nid)
+            log.error(f"[{node.title if node else nid}] {msg}")
+        if self._scene:
+            item = self._scene._node_items.get(nid)
+            if item:
+                item.set_running(False)
+                item.update()
 
-                # Reset execution times for nodes not yet cached from a previous item
-                for dep_id in sorted_deps:
-                    if dep_id not in global_ok:
-                        dep_node = self.graph.nodes.get(dep_id)
-                        if dep_node:
-                            dep_node.last_execution_time = None
+    def _cancel_execution(self) -> None:
+        self._worker.request_cancel()
 
-                # Execute subtree, stopping at first failure
-                item_results = dict(global_ok)
-                failed_dep: str | None = None
-
-                for dep_id in sorted_deps:
-                    if dep_id in item_results:
-                        continue  # already succeeded for a previous item
-                    res = engine.execute_node(dep_id, self.graph, context, item_results)
-                    item_results[dep_id] = res
-                    if not res.success:
-                        failed_dep = dep_id
-                        break  # stop this item's subtree
-
-                if failed_dep is not None:
-                    any_failed = True
-                    self._failed_session_items.add(session_item_id)
-                    self._highlight_failed_item(session_item_id)
-                    dep_node = self.graph.nodes.get(failed_dep)
-                    dep_title = dep_node.title if dep_node else failed_dep
-                    log.error(f"[{item_node.title}] Execution failed (caused by: {dep_title})")
-                else:
-                    # Promote this item's results to the global cache
-                    for k, v in item_results.items():
-                        global_ok.setdefault(k, v)
-                    # Log this item's outputs
-                    item_result = item_results.get(session_item_id)
-                    if item_result:
-                        session.results[session_item_id] = item_result.outputs
-                        for out_name, out_val in item_result.outputs.items():
-                            print(f"[{item_node.title}] {out_name}: {out_val}")
-
-            end_total = time.perf_counter()
-            total_time = end_total - start_total
-            unit = getattr(self.graph, 'time_unit', 'ms')
-            disp_time = total_time * 1000 if unit == "ms" else total_time
-            msg = (f"Execution complete with errors in {disp_time:.4f}{unit}"
-                   if any_failed else
-                   f"Execution complete in {disp_time:.4f}{unit}")
-            print(msg)
-            if self._scene and self._scene.views():
-                self._scene.views()[0].show_notification(msg, is_error=any_failed)
-
-            self.execution_finished.emit(session.name, session.results)
-            print(f"--- {session.name} complete ---")
-
-        except Exception as e:
-            log.error(f"Execution Error: {e}")
-            if self._scene and self._scene.views():
-                self._scene.views()[0].show_notification(f"Execution Error: {e}", is_error=True)
-        finally:
-            self.graph._state.ext_stores.update(volatile_backup)
-            self.refresh()
-            for failed_id in self._failed_session_items:
-                self._highlight_failed_item(failed_id)
-            self._failed_session_items.clear()
-            if self._scene:
-                self._scene.update()
-            try:
-                for w in QApplication.topLevelWidgets():
-                    if hasattr(w, 'panel_manager'):
-                        gmp = w.panel_manager.get_panel("GraphMapDock")
-                        if gmp and hasattr(gmp, 'update_execution_errors'):
-                            gmp.update_execution_errors()
-                        break
-            except Exception:
-                pass
+    def teardown(self) -> None:
+        self._worker.request_cancel()
+        self._worker_thread.quit()
+        self._worker_thread.wait(3000)
+        if not self._worker._loop.is_closed():
+            self._worker._loop.close()
                 
     def _highlight_failed_item(self, node_id: str):
         for i in range(self.node_list.count()):
@@ -1032,77 +1150,6 @@ class ExecutionPanel(QWidget):
                 if widget:
                     widget.set_error_highlight(True)
                 break
-
-    def _collect_with_deps(self, node_ids: list[str]) -> set[str]:
-        """Collect all nodes including dependencies, skipping stale IDs."""
-        result = {nid for nid in node_ids if nid in self.graph.nodes}
-        for node_id in list(result):
-            self._add_deps_recursive(node_id, result)
-        return result
-
-    def _add_deps_recursive(self, node_id: str, collected: set[str]):
-        """Recursively add dependency nodes."""
-        for conn in self.graph.connections:
-            if conn.dst_node == node_id:
-                if conn.src_node not in collected and conn.src_node in self.graph.nodes:
-                    collected.add(conn.src_node)
-                    self._add_deps_recursive(conn.src_node, collected)
-
-    # Resource-based dependencies (e.g., Variable writers for a reader)
-        node = self.graph.nodes.get(node_id)
-        if node:
-            for res in node.get_reads():
-                for other_id, other_node in self.graph.nodes.items():
-                    if other_id != node_id and res in other_node.get_writes():
-                        if other_id not in collected:
-                            collected.add(other_id)
-                            self._add_deps_recursive(other_id, collected)
-                    
-    def _sort_by_deps(self, node_ids: set[str]) -> list[str]:
-        """Sort nodes so dependencies come first."""
-        # Simple topological sort
-        in_degree = {nid: 0 for nid in node_ids}
-        deps = {nid: [] for nid in node_ids}
-        
-        for conn in self.graph.connections:
-            if conn.dst_node in node_ids and conn.src_node in node_ids:
-                deps[conn.src_node].append(conn.dst_node)
-                in_degree[conn.dst_node] += 1
-
-        resource_writers: dict[str, list[str]] = {}
-        for nid in node_ids:
-            node = self.graph.nodes.get(nid)
-            if node:
-                for res in node.get_writes():
-                    resource_writers.setdefault(res, []).append(nid)
-
-        for nid in node_ids:
-            node = self.graph.nodes.get(nid)
-            if node:
-                for res in node.get_reads():
-                    for w_nid in resource_writers.get(res, []):
-                        if w_nid != nid and nid not in deps[w_nid]:
-                            deps[w_nid].append(nid)
-                            in_degree[nid] += 1
-                
-        # Kahn's algorithm
-        queue = [nid for nid, deg in in_degree.items() if deg == 0]
-        result = []
-        
-        while queue:
-            nid = queue.pop(0)
-            result.append(nid)
-            for dep in deps[nid]:
-                in_degree[dep] -= 1
-                if in_degree[dep] == 0:
-                    queue.append(dep)
-                    
-        # Add any remaining (shouldn't happen in DAG)
-        for nid in node_ids:
-            if nid not in result:
-                result.append(nid)
-                
-        return result
 
 class ExecutionModularPanel(BasePanel):
     ID = "ExecutionDock"
