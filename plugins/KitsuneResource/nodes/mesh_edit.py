@@ -14,8 +14,8 @@ class MeshEditNode(BaseNode):
     CATEGORY = "KitsuneResource"
     color    = "#e06c75"
 
+    mode     = In("ENUM", enum_options=["removemesh", "keeponlymesh"], default="removemesh", allow_connection=False, full_row=True)
     dmx_file = In("FILE", label="DMX File")
-    mode     = In("ENUM", enum_options=["removemesh", "keeponlymesh"], default="removemesh", label="Mode", allow_connection=False,full_row=True)
     mesh     = DynIn("STRING", prefix="mesh")
 
     file = Out("FILE")

@@ -328,7 +328,7 @@ class NodeEditorScene(QGraphicsScene):
                     if hasattr(node, "on_property_changed"):
                         node.on_property_changed()
                     if node.dynamic_input_prefix or node.dynamic_output_prefix:
-                        node.sync_dynamic_ports()
+                        node.sync_dynamic_ports(allow_value_extra_slot=True)
                         
                     sig = item.layout_row_signature()
                     if sig != getattr(item, "_layout_rows", None):

@@ -63,6 +63,7 @@ class Port:
     port_type: PortType | str = PortType.ANY
     node_id:   str      = ""
     value:     Any      = None
+    default:   Any      = None
     label:     str      = ""
     allow_connection: bool = True
     is_dynamic: bool = False
@@ -78,6 +79,7 @@ class Port:
     required: bool = False
     graph_enum: str | None = None
     number_increment: float | None = None
+    linked_prefix:   str | None = None
 
     def can_connect_to(self, other: Port) -> bool:
         if self.is_input == other.is_input:
@@ -206,10 +208,12 @@ class DynIn(PortSpec):
     _is_required = False
     _is_input    = True
 
-    def __init__(self, type_str: str = "*", *, prefix: str | None = None, **kwargs: Any) -> None:
+    def __init__(self, type_str: str = "*", *, prefix: str | None = None, link: str | None = None, **kwargs: Any) -> None:
         super().__init__(type_str, **kwargs)
         self._cfg["dynamic"] = True
         self._prefix: str | None = prefix
+        if link:
+            self._cfg["linked_prefix"] = link
 
 
 class Out(PortSpec):
@@ -383,6 +387,7 @@ class BaseNode:
             node_id=self.id,
             value=default,
         )
+        p.default              = default
         p.editable             = editable
         p.display_in_inspector = display_in_insp
         p.required             = entry.required
@@ -394,6 +399,7 @@ class BaseNode:
         p.row_height           = row_height
         p.row_stretch          = row_stretch
         p.number_increment     = number_increment
+        p.linked_prefix        = cfg.get("linked_prefix")
 
         if enum_options is not None:
             p.enum_options = [str(opt) for opt in enum_options]
@@ -406,6 +412,7 @@ class BaseNode:
             p.enum_options = ["True", "False"]
             if isinstance(default, bool):
                 p.value = "True" if default else "False"
+            p.default = p.value  # sync default to the string form stored at runtime
 
         self.inputs[name] = p
         return p
@@ -532,7 +539,7 @@ class BaseNode:
                 pass
         return default
 
-    def sync_dynamic_ports(self) -> bool:
+    def sync_dynamic_ports(self, allow_value_extra_slot: bool = False) -> bool:
         if not self.graph:
             return False
 
@@ -545,6 +552,9 @@ class BaseNode:
         for p in self.outputs.values():
             if p.is_dynamic:
                 groups[(p.name.rstrip("0123456789"), False)] = p.port_type
+
+        # Compute raw target_count per prefix 
+        target_counts: dict[tuple[str, bool], int] = {}
 
         for (prefix, is_input), ptype in groups.items():
             connected_ports = {}
@@ -560,11 +570,54 @@ class BaseNode:
                         if suffix.isdigit():
                             connected_ports[int(suffix)] = c.src_port
 
+            port_dict = self.inputs if is_input else self.outputs
+
+            #  Value compaction: pack non-default/non-empty values forward 
+            # Runs BEFORE renumber_map so compacted values are visible to
+            # _val_occupied, letting renumber_map skip over them correctly.
+            # Only unconnected ports are touched; connected ports keep position.
+            if is_input:
+                connected_port_names = set(connected_ports.values())
+                unconnected = sorted(
+                    (int(n[len(prefix):]), n)
+                    for n in port_dict
+                    if n.startswith(prefix) and n[len(prefix):].isdigit()
+                    and n not in connected_port_names
+                )
+                if unconnected:
+                    default_val = port_dict[unconnected[0][1]].default
+
+                    def _occupied(v: Any, _dflt=default_val) -> bool:
+                        if v is None:
+                            return False
+                        if isinstance(v, str) and not str(v).strip():
+                            return False
+                        return v != _dflt
+
+                    vals = [port_dict[n].value for _, n in unconnected]
+                    packed = [v for v in vals if _occupied(v)] + [v for v in vals if not _occupied(v)]
+                    for (_, name), old_v, new_v in zip(unconnected, vals, packed):
+                        if old_v != new_v:
+                            port_dict[name].value = new_v
+                            changed = True
+
             sorted_indices = sorted(connected_ports.keys())
+
+            def _val_occupied(idx: int) -> bool:
+                if idx in connected_ports:
+                    return False
+                p = port_dict.get(f"{prefix}{idx}")
+                if p is None or p.value is None:
+                    return False
+                if isinstance(p.value, str) and not str(p.value).strip():
+                    return False
+                return p.value != p.default
 
             renumber_map = {}
             new_idx = 1
             for old_idx in sorted_indices:
+                while _val_occupied(new_idx):
+                    new_idx += 1
                 if old_idx != new_idx:
                     renumber_map[old_idx] = new_idx
                     changed = True
@@ -611,7 +664,46 @@ class BaseNode:
                         if suffix.isdigit():
                             max_conn_idx = max(max_conn_idx, int(suffix))
 
-            target_count = max(1, max_conn_idx + 1)
+            max_val_idx = 0
+            if is_input:
+                for p in port_dict.values():
+                    if (p.is_dynamic and p.name.startswith(prefix)
+                            and p.name[len(prefix):].isdigit()
+                            and p.value != p.default
+                            and str(p.value if p.value is not None else "").strip() != ""):
+                        max_val_idx = max(max_val_idx, int(p.name[len(prefix):]))
+
+            if allow_value_extra_slot:
+                # Create one empty slot after the last used (conn or value) port
+                target_count = max(1, max(max_conn_idx, max_val_idx) + 1)
+            else:
+                # Keep non-default-value ports alive but don't add an extra empty slot
+                target_count = max(1, max_conn_idx + 1, max_val_idx)
+
+            target_counts[(prefix, is_input)] = target_count
+
+        #  Honour linked_prefix grouping 
+        for (prefix, is_input) in list(target_counts):
+            if not is_input:
+                continue
+            port_dict = self.inputs
+            tmpl = next(
+                (p for p in port_dict.values()
+                 if p.is_dynamic and p.name.startswith(prefix)
+                 and p.name[len(prefix):].isdigit() and p.linked_prefix),
+                None,
+            )
+            if tmpl and tmpl.linked_prefix:
+                src_key = (tmpl.linked_prefix, True)
+                if src_key in target_counts:
+                    target_counts[(prefix, is_input)] = max(
+                        target_counts[(prefix, is_input)],
+                        target_counts[src_key],
+                    )
+
+        #  create / remove ports 
+        for (prefix, is_input), ptype in groups.items():
+            target_count = target_counts[(prefix, is_input)]
             port_dict = self.inputs if is_input else self.outputs
 
             template_port = next(
@@ -630,11 +722,33 @@ class BaseNode:
                         p.display_in_inspector = template_port.display_in_inspector
                         p.allow_connection     = template_port.allow_connection
                         p.label                = template_port.label
-                    port_dict[name] = p
+                        p.default              = template_port.default
+                        p.value                = template_port.default
+                        p.linked_prefix        = template_port.linked_prefix
+
+                    # Insert after the last sibling of the same prefix to keep order
+                    all_keys = list(port_dict.keys())
+                    last_pos = max(
+                        (j for j, k in enumerate(all_keys)
+                         if k.startswith(prefix) and k[len(prefix):].isdigit()),
+                        default=-1,
+                    )
+                    if last_pos >= 0:
+                        insert_after = all_keys[last_pos]
+                        new_dict: dict = {}
+                        for k in all_keys:
+                            new_dict[k] = port_dict[k]
+                            if k == insert_after:
+                                new_dict[name] = p
+                        port_dict.clear()
+                        port_dict.update(new_dict)
+                    else:
+                        port_dict[name] = p
+
                     changed = True
 
             ports_to_remove = [
-                name for name in port_dict
+                name for name in list(port_dict)
                 if name.startswith(prefix)
                 and name[len(prefix):].isdigit()
                 and int(name[len(prefix):]) > target_count
@@ -657,6 +771,8 @@ class BaseNode:
     def to_dict(self) -> dict:
         values = {}
         for k, v in self.inputs.items():
+            if v.value == v.default:
+                continue
             val = copy.deepcopy(v.value)
             if v.port_type == PortType.FILE and val and self.graph and self.graph.file_path:
                 try:
@@ -717,6 +833,8 @@ class BaseNode:
                         p.enum_options         = port.enum_options
                         p.enum_filter          = port.enum_filter
                         p.graph_enum           = port.graph_enum
+                        p.default              = port.default
+                        p.linked_prefix        = port.linked_prefix
                         node.inputs[name] = p
                         break
 
@@ -725,6 +843,8 @@ class BaseNode:
                 port = node.inputs[name]
                 if port.port_type == PortType.BOOL and isinstance(val, bool):
                     val = "True" if val else "False"
+                if val is None and port.is_dynamic and port.default is not None:
+                    val = port.default
                 port.value = val
 
         for p in (*node.inputs.values(), *node.outputs.values()):

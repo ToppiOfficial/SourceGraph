@@ -79,10 +79,28 @@ class RemoveNodeCommand(Command):
         self.description = f"Delete {title}"
 
     def execute(self) -> None:
+        scene = _get_scene(self._scene_ref)
+
+        affected = set()
+        for c in self.graph.connections:
+            if c.src_node == self.node_id:
+                affected.add(c.dst_node)
+            elif c.dst_node == self.node_id:
+                affected.add(c.src_node)
+
         self.graph.remove_node(self.node_id)
         # NodeRemovedEvent fires → scene._on_node_removed removes item + connections
 
+        if scene:
+            for nid in affected:
+                if nid in self.graph.nodes:
+                    scene._after_node_mutation(nid)
+            scene._flush_updates()
+            scene.graph_changed.emit()
+
     def undo(self) -> None:
+        scene = _get_scene(self._scene_ref)
+
         if self._registry is None:
             return
         cls = self._registry.get(self.snapshot.get("type"))
@@ -90,16 +108,26 @@ class RemoveNodeCommand(Command):
             return
         node = cls.from_dict(self.snapshot)
         self.graph.add_node(node)
-        # NodeAddedEvent fires → scene creates item
+        # NodeAddedEvent fires → scene creates item + calls _flush_updates
 
-        # Restore connections that were removed with this node
+        affected = set()
         for cd in self.conn_snapshots:
             try:
                 self.graph.connect(cd["src_node"], cd["src_port"],
                                    cd["dst_node"], cd["dst_port"])
                 # ConnectionAddedEvent fires → scene materialises
+                for nid in (cd["src_node"], cd["dst_node"]):
+                    if nid != self.node_id:
+                        affected.add(nid)
             except Exception:
                 pass
+
+        if scene:
+            for nid in affected:
+                if nid in self.graph.nodes:
+                    scene._after_node_mutation(nid)
+            scene._flush_updates()
+            scene.graph_changed.emit()
 
 
 class ConnectCommand(Command):
@@ -221,14 +249,55 @@ class DisconnectCommand(Command):
         self.description = "Disconnect"
 
     def execute(self) -> None:
-        self.graph.disconnect(self.src_node, self.src_port,
-                              self.dst_node, self.dst_port)
-        # ConnectionRemovedEvent fires → _on_connection_removed handles visuals
+        scene = _get_scene(self._scene_ref)
+
+        if scene:
+            scene._suppress_bus = True
+        try:
+            self.graph.disconnect(self.src_node, self.src_port,
+                                  self.dst_node, self.dst_port)
+        finally:
+            if scene:
+                scene._suppress_bus = False
+
+        if scene:
+            key = (self.src_node, self.src_port, self.dst_node, self.dst_port)
+            for pair in list(scene._conn_items):
+                c, ci = pair
+                if (c.src_node, c.src_port, c.dst_node, c.dst_port) == key:
+                    try:
+                        scene.removeItem(ci)
+                    except RuntimeError:
+                        pass
+                    scene._conn_items.remove(pair)
+                    break
+
+            scene._after_node_mutation(self.src_node)
+            scene._after_node_mutation(self.dst_node)
+            scene._flush_updates()
+            scene.graph_changed.emit()
 
     def undo(self) -> None:
-        self.graph.connect(self.src_node, self.src_port,
-                           self.dst_node, self.dst_port)
-        # ConnectionAddedEvent fires → _on_connection_added handles visuals
+        scene = _get_scene(self._scene_ref)
+
+        if scene:
+            scene._suppress_bus = True
+        try:
+            self.graph.connect(self.src_node, self.src_port,
+                               self.dst_node, self.dst_port)
+        finally:
+            if scene:
+                scene._suppress_bus = False
+
+        if scene:
+            scene._cleanup_ghost_connections()
+            conn = self.graph.get_input_connection(self.dst_node, self.dst_port)
+            if conn:
+                scene._materialise_conn(conn)
+            scene._after_node_mutation(self.src_node)
+            scene._after_node_mutation(self.dst_node)
+            scene._flush_updates()
+            scene.graph_changed.emit()
 
 
 class MoveNodesCommand(Command):

@@ -59,3 +59,29 @@ def resolve_alias(key: str) -> str:
 
 def get_all_specs() -> list[PortTypeSpec]:
     return list(_registry.values())
+
+
+_PROXY_SENTINEL = object()
+
+
+def make_port_notify_proxy(port, notify_fn):
+    """Return a proxy for *port* that calls notify_fn() whenever .value is written."""
+
+    class _Proxy:
+        __slots__ = ('_port', '_notify')
+
+        def __init__(self):
+            object.__setattr__(self, '_port', port)
+            object.__setattr__(self, '_notify', notify_fn)
+
+        def __getattr__(self, name):
+            return getattr(object.__getattribute__(self, '_port'), name)
+
+        def __setattr__(self, name, value):
+            real = object.__getattribute__(self, '_port')
+            old = getattr(real, name, _PROXY_SENTINEL)
+            setattr(real, name, value)
+            if name == 'value' and value != old:
+                object.__getattribute__(self, '_notify')()
+
+    return _Proxy()

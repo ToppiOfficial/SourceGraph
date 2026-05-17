@@ -22,7 +22,7 @@ from core.node import port_uses_graph_variables, PortType, PORT_COLORS
 from core.port_type_registry import (
     get_color as _get_port_color,
     is_inspector_editable as _type_inspector_editable,
-    get_port_type_spec as _get_type_spec,
+    get_port_type_spec as _get_type_spec, make_port_notify_proxy
 )
 from gui.theme import *
 from gui.items.node import NodeItem
@@ -353,7 +353,13 @@ class SelectedNodePanel(QWidget):
         else:
             spec = _get_type_spec(port.port_type)
             if spec and spec.inspector_widget_factory is not None:
-                w = spec.inspector_widget_factory(port)
+
+                def _notify(item=self._item, mw=self.main_window):
+                    if item and mw and mw.scene:
+                        mw.scene._after_node_mutation(item.node.id)
+                        mw.scene._emit_graph_changed()
+
+                w = spec.inspector_widget_factory(make_port_notify_proxy(port, _notify))
                 if w is not None:
                     rl.addWidget(w, 1)
                     return row

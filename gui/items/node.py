@@ -395,7 +395,7 @@ class NodeItem(QGraphicsItem):
                 row_idx += 1
             self._output_port_names.append(name)
 
-        # Inputs — pass 1: normal rows and full_row ports
+        # Normal rows and full_row ports
         below_ports_queue: list[tuple[str, "Port"]] = []
         current_y = TITLE_H + row_idx * ROW_H
         for name, port in self.node.inputs.items():
@@ -496,7 +496,14 @@ class NodeItem(QGraphicsItem):
         """Create basic widgets based on port type using theme styles."""
         spec = _get_type_spec(port.port_type)
         if spec and spec.canvas_widget_factory is not None:
-            return spec.canvas_widget_factory(port, parent)
+            from core.port_type_registry import make_port_notify_proxy
+            node_id = self.node.id
+            def _notify(nid=node_id):
+                sc = self.scene()
+                if sc:
+                    sc._after_node_mutation(nid)
+                    sc._emit_graph_changed()
+            return spec.canvas_widget_factory(make_port_notify_proxy(port, _notify), parent)
 
         if port.port_type == PortType.BOOL:
             toggle = QPushButton(parent)
@@ -653,16 +660,17 @@ class NodeItem(QGraphicsItem):
 
         old_val = edit.property("original_val")
 
-        # Skip if unchanged
+        # Skip if unchanged — compare against value when editing started (old_val), not current
+        # port.value, which textChanged may have already updated to new_val
         try:
             if port.port_type == PortType.FLOAT:
-                is_same = abs(float(port.value or 0) - float(new_val or 0)) < 1e-7
+                is_same = abs(float(old_val or 0) - float(new_val or 0)) < 1e-7
             elif port.port_type == PortType.INT:
-                is_same = int(port.value or 0) == int(new_val or 0)
+                is_same = int(old_val or 0) == int(new_val or 0)
             else:
-                is_same = str(port.value) == new_val
+                is_same = str(old_val if old_val is not None else "") == new_val
         except (ValueError, TypeError):
-            is_same = str(port.value) == new_val
+            is_same = str(old_val if old_val is not None else "") == new_val
 
         if is_same:
             return
@@ -942,9 +950,9 @@ class NodeItem(QGraphicsItem):
         else:
             port.value = new_value
         
-        # Trigger graph update
+        # Trigger graph update — skip for dynamic ports to avoid refresh mid-type
         scene = self.scene()
-        if scene:
+        if scene and not (port and port.is_dynamic):
             scene._after_node_mutation(self.node.id)
             scene._emit_graph_changed()
     

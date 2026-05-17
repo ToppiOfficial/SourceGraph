@@ -22,7 +22,7 @@ class DriverBoneNode(BaseNode):
     restpose_frame = OptIn("INT",    default=0,   label="Restpose Frame")
     scale          = OptIn("FLOAT",  default=1.0, label="Scale")
     trigger        = DynIn("VECTOR2", prefix="trigger", default="90 0")
-    helper         = DynIn("STRING",  prefix="helper", editable=False)
+    helper         = DynIn("STRING",  prefix="helper")
 
     file     = Out("FILE")
     qc_param = Out("QC_COMMAND")
