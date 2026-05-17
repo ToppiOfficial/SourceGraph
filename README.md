@@ -1,6 +1,6 @@
 # SourceGraph
 
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/yourusername/SrcGraph)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/ToppiOfficial/SourceGraph)
 [![Python](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -43,8 +43,8 @@
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/SrcGraph.git
-   cd SrcGraph
+   git clone https://github.com/ToppiOfficial/SourceGraph.git
+   cd SourceGraph
    ```
 
 2. **Run the startup script:**
@@ -62,8 +62,8 @@
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/SrcGraph.git
-   cd SrcGraph
+   git clone https://github.com/ToppiOfficial/SourceGraph.git
+   cd SourceGraph
    ```
 
 2. **Create and activate a virtual environment:**
