@@ -252,7 +252,7 @@ class NodeSearchDialog(QDialog):
             preview_scene.setSceneRect(padded_rect)
 
             # Available width: panel(280) - preview_layout margins(32) - render_layout margins(8) = 240px.
-            # Scale down only — never upscale a small node.
+            # Scale down only - never upscale a small node.
             avail_w = 240
             scale = min(avail_w / padded_rect.width(), 1.0) if padded_rect.width() > 0 else 1.0
             # Size the container to exactly fit the scaled node height.

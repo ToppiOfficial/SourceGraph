@@ -1,10 +1,10 @@
-# SrcGraph (SourceGraph)
+# SourceGraph
 
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/yourusername/SrcGraph)
 [![Python](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**SrcGraph** is an experimental node-graph based tool built with Python 3.14 and PySide6 (Qt). It is designed to provide a flexible and extensible environment for visual logic orchestration, with a particular focus on Source Engine (QC) model processing and general-purpose primitive operations.
+**SourceGraph** is an experimental node-graph based tool built with Python 3.14 and PySide6 (Qt). It is designed to provide a flexible and extensible environment for visual logic orchestration, with a particular focus on Source Engine (QC) model processing and general-purpose primitive operations.
 
 <img width="1920" height="1032" alt="Screenshot 2026-05-11 031203" src="https://github.com/user-attachments/assets/bb48494e-b41b-4a1e-9fe6-698c6ac43d06" />
 

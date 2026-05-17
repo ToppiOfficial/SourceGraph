@@ -276,7 +276,7 @@ class BaseBrowserWidget(QWidget):
         self._do_refresh()
 
     def _do_refresh(self):
-        """Subclass implements this — called only when safe to rebuild."""
+        """Subclass implements this - called only when safe to rebuild."""
         raise NotImplementedError()
 
     def _sync_to_graph(self):

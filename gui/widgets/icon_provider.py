@@ -92,13 +92,13 @@ def load_pixmap(
     Args:
         name:  Icon name with or without extension (e.g. ``"save"`` or ``"save.svg"``).
                Subdirectory paths are supported (``"toolbar/save"``).
-        size:  Desired pixel size. ``int`` → square; ``QSize`` → exact dimensions.
+        size:  Desired pixel size. ``int`` -> square; ``QSize`` -> exact dimensions.
                ``None`` uses the image's native size (SVGs default to 16×16).
         color: Tint color applied to SVG icons. Accepts ``QColor`` or CSS hex string
                (``"#ffffff"``). Ignored for raster icons.
 
     Returns:
-        ``QPixmap`` — empty pixmap if the icon file is not found.
+        ``QPixmap`` - empty pixmap if the icon file is not found.
     """
     if isinstance(size, int):
         size = QSize(size, size)

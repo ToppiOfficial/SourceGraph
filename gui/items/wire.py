@@ -3,23 +3,29 @@ from PySide6.QtWidgets import QGraphicsPathItem, QMenu
 from PySide6.QtGui     import QPainterPath, QPainterPathStroker, QPen, QColor, QPolygonF
 from PySide6.QtCore    import QPointF, Qt
 from gui.theme import *
+from core.port_type_registry import get_color as _get_port_color
 
 
 class ConnectionItem(QGraphicsPathItem):
     """Cubic-bezier or linear wire between two ports."""
 
-    _PEN_IDLE    = QPen(QColor(WIRE_IDLE), 2.0)
-    _PEN_SEL     = QPen(QColor(WIRE_SEL), 2.5)
-    _PEN_VALID   = QPen(QColor(COLOR_VALID), 2.0)
-    _PEN_INVALID = QPen(QColor(COLOR_INVALID), 2.0)
-    
-    wire_style = "spline"
+    wire_style      = "spline"  # "spline" | "linear" | "straight"
+    wire_width      = 3.0       # idle / valid / invalid pen width (px)
+    wire_width_sel  = 3.5       # selected pen width (px)
+    arrow_spacing   = 300.0     # distance between arrowhead chevrons (px)
+    arrow_scale     = 1.0       # uniform arrowhead size multiplier (1.0 = default)
 
-    def __init__(self, src: QPointF, dst: QPointF | None = None) -> None:
+    _PEN_SEL     = QPen(QColor(WIRE_SEL),      wire_width_sel)
+    _PEN_VALID   = QPen(QColor(COLOR_VALID),   wire_width)
+    _PEN_INVALID = QPen(QColor(COLOR_INVALID), wire_width)
+
+    def __init__(self, src: QPointF, dst: QPointF | None = None, src_port_type: str | None = None) -> None:
         super().__init__()
         self.src = src
         self.dst = dst or src
         self._drag_status: bool | None = None
+        color = _get_port_color(src_port_type) if src_port_type else WIRE_IDLE
+        self._pen_idle = QPen(QColor(color), ConnectionItem.wire_width)
         self.setZValue(-1)
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable)
         self._refresh()
@@ -69,7 +75,7 @@ class ConnectionItem(QGraphicsPathItem):
         elif self._drag_status is False:
             pen = self._PEN_INVALID
         else:
-            pen = self._PEN_IDLE
+            pen = self._pen_idle
 
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -78,33 +84,34 @@ class ConnectionItem(QGraphicsPathItem):
         # Draw Arrows
         path_len = self.path().length()
         if path_len > 30:
-            spacing = 300.0
+            spacing = ConnectionItem.arrow_spacing
             # Calculate total arrows, ensuring at least one
             num_arrows = max(1, int(path_len / spacing))
-            
+
             painter.save()
             painter.setBrush(pen.color())
             painter.setPen(Qt.NoPen)
-            
+
+            s = ConnectionItem.arrow_scale
+            arrow_head = QPolygonF([
+                QPointF(-8 * s, -6 * s),
+                QPointF( 6 * s,  0),
+                QPointF(-8 * s,  6 * s),
+            ])
+
             for i in range(1, num_arrows + 1):
                 # Distribute arrows evenly
                 percent = (i * (path_len / (num_arrows + 1))) / path_len
 
                 if num_arrows == 1:
                     percent = 0.5
-                
+
                 arrow_pt = self.path().pointAtPercent(percent)
                 tangent  = self.path().angleAtPercent(percent)
-                
+
                 painter.save()
                 painter.translate(arrow_pt)
                 painter.rotate(-tangent)
-                
-                arrow_head = QPolygonF([
-                    QPointF(-8, -6),
-                    QPointF(6, 0),
-                    QPointF(-8, 6)
-                ])
                 painter.drawPolygon(arrow_head)
                 painter.restore()
             painter.restore()

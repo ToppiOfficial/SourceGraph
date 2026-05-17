@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QUndoCommand
 
-from core.node import PortType, _coerce
+from core.node import _coerce
 from gui.logger import log
 
 if TYPE_CHECKING:
@@ -81,13 +81,7 @@ class PropertyCommand(QUndoCommand):
     def _apply(self, node_item, val) -> None:
         port = node_item.node.inputs.get(self.port_name)
 
-        if port and port.port_type == PortType.FLOAT:
-            try:
-                val_str = f"{float(val):g}"
-            except (ValueError, TypeError):
-                val_str = str(val)
-        else:
-            val_str = str(val) if val is not None else ""
+        val_str = str(val) if val is not None else ""
 
         if port:
             _coerce(port, val_str)

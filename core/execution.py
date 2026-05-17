@@ -1,12 +1,10 @@
 from __future__ import annotations
 import copy
-import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 import time
 from enum import Enum, auto
 from collections import defaultdict, deque
-from .node import PortType
 from core.graph_store_registry import get_volatile_store_specs
 
 
@@ -96,7 +94,7 @@ class StandardExecutionEngine:
             for pname, port in node.inputs.items():
                 value = connected.get(pname, port.value)
                 
-                if value is not None and port.port_type != PortType.ANY:
+                if value is not None and port.port_type != "any":
                     value = self._coerce_type(value, port.port_type)
                 
                 kwargs[pname] = value
@@ -222,33 +220,11 @@ class StandardExecutionEngine:
         
         return results
     
-    def _coerce_type(self, value: Any, target_type: Any) -> Any:
+    def _coerce_type(self, value: Any, target_type: str) -> Any:
         """Coerce value to target port type for type safety."""
-        
-        if target_type == PortType.INT:
-            return int(value)
-        elif target_type == PortType.FLOAT:
-            return float(value)
-        elif target_type == PortType.BOOL:
-            if isinstance(value, str):
-                v = value.lower()
-                if v in ("true", "1", "yes"):
-                    return True
-                elif v in ("false", "0", "no"):
-                    return False
-                else:
-                    raise ValueError(f"Invalid boolean: '{value}'")
-            return bool(value)
-        elif target_type == PortType.DICT:
-            if isinstance(value, str):
-                return json.loads(value)
-            return dict(value)
-        elif target_type == PortType.ARRAY:
-            if isinstance(value, list):
-                return value
-            return [value]
-        
-        return value
+        from core.port_type_registry import get_port_type_spec
+        spec = get_port_type_spec(target_type)
+        return spec.coerce_value(value) if spec and spec.coerce_value else value
 
 
 # Global execution engine instance

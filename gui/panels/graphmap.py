@@ -7,7 +7,7 @@ from PySide6.QtGui import (QKeyEvent, QKeySequence, QPainter, QWheelEvent,
                             QPainterPath, QFont, QPen, QColor, QBrush, QLinearGradient, QTransform)
 
 from gui.panels.base_panel import BasePanel
-from core.node import BaseNode, Port, PortType
+from core.node import BaseNode, Port
 from core.graph import Graph
 from gui.node_editor import NodeEditorScene, NodeEditorView
 from gui.theme import ACCENT, BG_RAISED, COLOR_ERROR, FG_MAIN
@@ -105,8 +105,8 @@ class NavGraphNode(BaseNode):
         self.nav_node = nav_node
         self.locked_title = True
         self.allow_folding = False
-        self.inputs = {"in": Port("in", True, PortType.SIGNAL, self.id)}
-        self.outputs = {"out": Port("out", False, PortType.SIGNAL, self.id)}
+        self.inputs = {"in": Port("in", True, "signal", self.id)}
+        self.outputs = {"out": Port("out", False, "signal", self.id)}
         if nav_node:
             name = os.path.basename(nav_node.path) or "Root"
             self.title = name.upper()

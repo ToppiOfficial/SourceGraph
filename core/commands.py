@@ -1,7 +1,7 @@
 """
 Delta-based command objects for undo/redo.
 
-All commands are plain Python — no Qt imports.
+All commands are plain Python - no Qt imports.
 Scene access is via weakref to avoid circular imports.
 Commands are executed immediately when pushed; the wrapper in history.py
 handles the Qt undo stack integration.
@@ -10,7 +10,7 @@ from __future__ import annotations
 import weakref
 from typing import Any, TYPE_CHECKING
 
-from core.node import PortType, _coerce
+from core.node import _coerce
 
 if TYPE_CHECKING:
     from core.graph import Graph
@@ -56,11 +56,11 @@ class AddNodeCommand(Command):
 
     def execute(self) -> None:
         self.graph.add_node(self.node)
-        # NodeAddedEvent fires → scene._on_node_added creates the item
+        # NodeAddedEvent fires -> scene._on_node_added creates the item
 
     def undo(self) -> None:
         self.graph.remove_node(self.node.id)
-        # NodeRemovedEvent fires → scene._on_node_removed removes the item
+        # NodeRemovedEvent fires -> scene._on_node_removed removes the item
 
 
 class RemoveNodeCommand(Command):
@@ -89,7 +89,7 @@ class RemoveNodeCommand(Command):
                 affected.add(c.src_node)
 
         self.graph.remove_node(self.node_id)
-        # NodeRemovedEvent fires → scene._on_node_removed removes item + connections
+        # NodeRemovedEvent fires -> scene._on_node_removed removes item + connections
 
         if scene:
             for nid in affected:
@@ -108,14 +108,14 @@ class RemoveNodeCommand(Command):
             return
         node = cls.from_dict(self.snapshot)
         self.graph.add_node(node)
-        # NodeAddedEvent fires → scene creates item + calls _flush_updates
+        # NodeAddedEvent fires -> scene creates item + calls _flush_updates
 
         affected = set()
         for cd in self.conn_snapshots:
             try:
                 self.graph.connect(cd["src_node"], cd["src_port"],
                                    cd["dst_node"], cd["dst_port"])
-                # ConnectionAddedEvent fires → scene materialises
+                # ConnectionAddedEvent fires -> scene materialises
                 for nid in (cd["src_node"], cd["dst_node"]):
                     if nid != self.node_id:
                         affected.add(nid)
@@ -162,7 +162,7 @@ class ConnectCommand(Command):
                     scene._conn_items.remove(pair)
                     break
 
-        # Suppress bus during graph.connect() — we manage visuals manually here
+        # Suppress bus during graph.connect() - we manage visuals manually here
         # to avoid double-materialisation since _try_connect's old path no longer runs
         if scene:
             scene._suppress_bus = True
@@ -352,13 +352,7 @@ class ChangePropertyCommand(Command):
         port = node.inputs.get(self.port_name)
         if port is None:
             return
-        if port.port_type == PortType.FLOAT:
-            try:
-                val_str = f"{float(val):g}"
-            except (ValueError, TypeError):
-                val_str = str(val)
-        else:
-            val_str = str(val) if val is not None else ""
+        val_str = str(val) if val is not None else ""
         _coerce(port, val_str)
 
         scene = _get_scene(self._scene_ref)

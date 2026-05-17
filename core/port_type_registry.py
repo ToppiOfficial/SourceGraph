@@ -8,14 +8,18 @@ class PortTypeSpec:
     key: str
     color: str = "#aaaaaa"
     editable: bool = False
-    inspector_editable: bool | None = None  # None → inherit from editable
+    inspector_editable: bool | None = None  # None -> inherit from editable
     canvas_widget_factory: Any = None       # (port, parent) -> QWidget | None
     inspector_widget_factory: Any = None    # (port) -> QWidget | None
     aliases: list[str] = field(default_factory=list)
+    coerce_text: Any = None    # (text: str) -> Any         - text input → native value
+    validate_text: Any = None  # (text: str) -> str | None  - None = valid, str = error msg
+    coerce_value: Any = None   # (value: Any) -> Any        - runtime coercion between nodes
+    values_equal: Any = None   # (cur: Any, new_text: str) -> bool - skip-if-same check
 
 
 _registry: dict[str, PortTypeSpec] = {}
-_alias_map: dict[str, str] = {}  # alias/key → canonical key
+_alias_map: dict[str, str] = {}  # alias/key -> canonical key
 
 
 def register_port_type(spec: PortTypeSpec) -> None:
@@ -30,7 +34,7 @@ def register_port_type(spec: PortTypeSpec) -> None:
 
 
 def get_port_type_spec(key) -> PortTypeSpec | None:
-    k = key.value if hasattr(key, 'value') else str(key)
+    k = str(key)
     canonical = _alias_map.get(k)
     return _registry.get(canonical) if canonical else None
 

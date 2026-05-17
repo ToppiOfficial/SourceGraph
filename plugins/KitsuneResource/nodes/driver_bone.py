@@ -50,7 +50,7 @@ class DriverBoneNode(BaseNode):
             try:
                 triggers.append((float(parts[0]), int(parts[1])))
             except ValueError:
-                self.fail(f"Could not parse trigger '{raw}' — expected 'angle frame' e.g. '45.0 3'")
+                self.fail(f"Could not parse trigger '{raw}' - expected 'angle frame' e.g. '45.0 3'")
 
         target_bones = [t for t in self.collect_dynamic("helper", kwargs) if t and str(t).strip()]
 

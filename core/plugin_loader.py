@@ -16,10 +16,10 @@ class PluginLoader:
     """Discovers and loads node and panel classes from plugins/ subdirectories.
 
     Expected layout:
-        plugins/<plugin_name>/nodes/<module>.py    — BaseNode subclasses
-        plugins/<plugin_name>/panels/<module>.py   — BasePanel subclasses (optional)
+        plugins/<plugin_name>/nodes/<module>.py    - BaseNode subclasses
+        plugins/<plugin_name>/panels/<module>.py   - BasePanel subclasses (optional)
 
-    Errors in individual plugins are logged and skipped — they never crash the app.
+    Errors in individual plugins are logged and skipped - they never crash the app.
     """
 
     def __init__(self, registry: "NodeRegistry") -> None:
@@ -216,7 +216,7 @@ class PluginLoader:
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
-                # No class scanning — registration is a side effect of exec.
+                # No class scanning - registration is a side effect of exec.
             except Exception as exc:
                 print(f"[PluginLoader] Error loading types '{py_file}': {exc}")
 

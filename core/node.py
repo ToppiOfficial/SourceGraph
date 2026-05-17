@@ -5,7 +5,6 @@ import json
 import copy
 from typing import Any, TYPE_CHECKING
 from dataclasses import dataclass
-from enum import Enum
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -13,54 +12,11 @@ if TYPE_CHECKING:
 _SENTINEL = object()  # used as default sentinel in Port.set_value
 
 
-class PortType(str, Enum):
-    ANY        = "any"
-    STRING     = "string"
-    INT        = "int"
-    FLOAT      = "float"
-    FILE       = "file"
-    BOOL       = "bool"
-    ENUM       = "enum"
-    DICT       = "dict"
-    ARRAY      = "array"
-    SIGNAL     = "signal"
-
-
-PORT_COLORS: dict[PortType, str] = {
-    PortType.ANY:        "#aaaaaa",
-    PortType.STRING:     "#4ec9b0",
-    PortType.INT:        "#569cd6",
-    PortType.FLOAT:      "#9cdcfe",
-    PortType.FILE:       "#ce9178",
-    PortType.BOOL:       "#ff8c00",
-    PortType.ENUM:       "#b4629d",
-    PortType.DICT:       "#ef8ed8",
-    PortType.ARRAY:      "#bd93f9",
-    PortType.SIGNAL:     "#f1fa8c",
-}
-
-from core.port_type_registry import register_port_type as _rpt, PortTypeSpec as _PTS
-for _k, _c, _e, _ie, _al in [
-    ("any",        "#aaaaaa", True,  False, ["*"]),
-    ("string",     "#4ec9b0", True,  True,  ["str"]),
-    ("int",        "#569cd6", True,  True,  []),
-    ("float",      "#9cdcfe", True,  True,  ["number"]),
-    ("file",       "#ce9178", True,  True,  ["path"]),
-    ("bool",       "#ff8c00", True,  True,  ["boolean"]),
-    ("enum",       "#b4629d", True,  True,  []),
-    ("dict",       "#ef8ed8", False, False, ["object"]),
-    ("array",      "#bd93f9", False, False, ["list"]),
-    ("signal",     "#f1fa8c", False, False, ["flow"]),
-]:
-    _rpt(_PTS(key=_k, color=_c, editable=_e, inspector_editable=_ie, aliases=_al))
-del _rpt, _PTS, _k, _c, _e, _ie, _al
-
-
 @dataclass
 class Port:
     name:      str
     is_input:  bool
-    port_type: PortType | str = PortType.ANY
+    port_type: str = "any"
     node_id:   str      = ""
     value:     Any      = None
     default:   Any      = None
@@ -86,7 +42,7 @@ class Port:
             return False
         if not self.allow_connection or not other.allow_connection:
             return False
-        if self.port_type == PortType.ANY or other.port_type == PortType.ANY:
+        if self.port_type == "any" or other.port_type == "any":
             return True
         return self.port_type == other.port_type
 
@@ -111,39 +67,13 @@ def port_uses_graph_variables(port: Port) -> bool:
     )
 
 
-TYPE_MAP: dict[str, PortType] = {
-    "*": PortType.ANY,
-    "any": PortType.ANY,
-    "string": PortType.STRING,
-    "str": PortType.STRING,
-    "int": PortType.INT,
-    "float": PortType.FLOAT,
-    "number": PortType.FLOAT,
-    "file": PortType.FILE,
-    "path": PortType.FILE,
-    "bool": PortType.BOOL,
-    "boolean": PortType.BOOL,
-    "enum": PortType.ENUM,
-    "dict": PortType.DICT,
-    "object": PortType.DICT,
-    "array": PortType.ARRAY,
-    "list": PortType.ARRAY,
-    "signal": PortType.SIGNAL,
-    "flow": PortType.SIGNAL,
-}
-
-
-def parse_type(type_str: str) -> PortType | str:
-    key = type_str.lower()
-    builtin = TYPE_MAP.get(key)
-    if builtin is not None:
-        return builtin
+def parse_type(type_str: str) -> str:
     from core.port_type_registry import resolve_alias
-    return resolve_alias(key)
+    return resolve_alias(type_str.lower())
 
 
 # ---------------------------------------------------------------------------
-# PortSpec declarations — the only way to define ports on a node
+# PortSpec declarations - the only way to define ports on a node
 # ---------------------------------------------------------------------------
 
 class PortSpec:
@@ -371,7 +301,7 @@ class BaseNode:
         row_stretch      = cfg.get("row_stretch", False)
         number_increment = cfg.get("step")
 
-        if port_type == PortType.BOOL and default is None:
+        if port_type == "bool" and default is None:
             default = False
 
         name = entry.name
@@ -408,7 +338,7 @@ class BaseNode:
         if graph_enum is not None:
             p.graph_enum = graph_enum
 
-        if port_type == PortType.BOOL and enum_options is None:
+        if port_type == "bool" and enum_options is None:
             p.enum_options = ["True", "False"]
             if isinstance(default, bool):
                 p.value = "True" if default else "False"
@@ -463,7 +393,7 @@ class BaseNode:
         if not self.graph:
             return
         for port in self.inputs.values():
-            if port.port_type != PortType.ENUM or port.enum_options is not None:
+            if port.port_type != "enum" or port.enum_options is not None:
                 continue
             key = port.graph_enum
             if key is None:
@@ -545,7 +475,7 @@ class BaseNode:
 
         changed = False
 
-        groups: dict[tuple[str, bool], PortType] = {}
+        groups: dict[tuple[str, bool], str] = {}
         for p in self.inputs.values():
             if p.is_dynamic:
                 groups[(p.name.rstrip("0123456789"), True)] = p.port_type
@@ -774,7 +704,7 @@ class BaseNode:
             if v.value == v.default:
                 continue
             val = copy.deepcopy(v.value)
-            if v.port_type == PortType.FILE and val and self.graph and self.graph.file_path:
+            if v.port_type == "file" and val and self.graph and self.graph.file_path:
                 try:
                     abs_val = os.path.abspath(self.resolve_path(val))
                     base_dir = self.graph.file_path.parent
@@ -841,7 +771,7 @@ class BaseNode:
         for name, val in values.items():
             if name in node.inputs:
                 port = node.inputs[name]
-                if port.port_type == PortType.BOOL and isinstance(val, bool):
+                if port.port_type == "bool" and isinstance(val, bool):
                     val = "True" if val else "False"
                 if val is None and port.is_dynamic and port.default is not None:
                     val = port.default
@@ -879,18 +809,9 @@ class BaseNode:
 
 def _coerce(port, text: str) -> None:
     """Write a validated string value back into a port, coercing to the port's native type."""
+    from core.port_type_registry import get_port_type_spec
+    spec = get_port_type_spec(port.port_type)
     try:
-        if port.port_type == PortType.INT:
-            port.value = int(text)
-        elif port.port_type == PortType.FLOAT:
-            port.value = float(text)
-        elif port.port_type == PortType.BOOL:
-            if isinstance(text, bool):
-                port.value = text
-            else:
-                val = str(text).lower().strip()
-                port.value = val in ("true", "1", "yes")
-        else:
-            port.value = text
-    except ValueError:
+        port.value = spec.coerce_text(text) if spec and spec.coerce_text else text
+    except (ValueError, TypeError):
         port.value = text

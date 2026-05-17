@@ -663,7 +663,7 @@ class ExecutionPanel(QWidget):
 
         if self._session_rename_original_name and self._session_rename_original_name != current_name:
             mgr = self._scene._undo_manager if (self._scene and hasattr(self._scene, "_undo_manager")) else None
-            with mgr.transaction(f"Rename Session: {self._session_rename_original_name} → {current_name}") if mgr else nullcontext():
+            with mgr.transaction(f"Rename Session: {self._session_rename_original_name} -> {current_name}") if mgr else nullcontext():
                 pass
             self._session_rename_original_name = current_name
 
@@ -824,7 +824,7 @@ class ExecutionPanel(QWidget):
         if event.type() == QEvent.MouseButtonPress:
             if self._scene and self._scene.views():
                 view = self._scene.views()[0]
-                # items() takes viewport coordinates — event.pos() is in viewport coords
+                # items() takes viewport coordinates - event.pos() is in viewport coords
                 hit = next(
                     (i for i in view.items(event.pos()) if isinstance(i, NodeItem)),
                     None
@@ -843,7 +843,7 @@ class ExecutionPanel(QWidget):
             vp = self._scene.views()[0].viewport()
             vp.setCursor(Qt.CrossCursor)
             vp.installEventFilter(self)
-        log.info("[Replace] Click a node to replace — Escape to cancel")
+        log.info("[Replace] Click a node to replace - Escape to cancel")
 
     def _cancel_eyedropper(self):
         self._eyedropper_active = False

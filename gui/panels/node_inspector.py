@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QCursor, QPainter
 
-from core.node import port_uses_graph_variables, PortType, PORT_COLORS
+from core.node import port_uses_graph_variables
 from core.port_type_registry import (
     get_color as _get_port_color,
     is_inspector_editable as _type_inspector_editable,
@@ -40,20 +40,11 @@ def _port_is_editable(port_type) -> bool:
     return _type_inspector_editable(port_type)
 
 
-def _validate_port_text(port_type: PortType, text: str) -> str | None:
+def _validate_port_text(port_type: str, text: str) -> str | None:
     if not text:
         return None
-    try:
-        if port_type == PortType.INT:
-            int(text)
-        elif port_type == PortType.FLOAT:
-            float(text)
-        elif port_type == PortType.BOOL:
-            if text.lower() not in ("true", "1", "yes", "false", "0", "no"):
-                raise ValueError
-    except ValueError:
-        return f"'{text}' is not a valid {port_type.value}"
-    return None
+    spec = _get_type_spec(port_type)
+    return spec.validate_text(text) if spec and spec.validate_text else None
 
 
 _TITLE_EDIT_STYLE = f"""
@@ -359,18 +350,30 @@ class SelectedNodePanel(QWidget):
                         mw.scene._after_node_mutation(item.node.id)
                         mw.scene._emit_graph_changed()
 
-                w = spec.inspector_widget_factory(make_port_notify_proxy(port, _notify))
+                def _commit(new_val, p=pname, pt=port):
+                    old_val = pt.value
+                    if old_val == new_val:
+                        return
+                    self._suppress_refresh = True
+                    try:
+                        self.main_window.scene.undo_stack.push(
+                            PropertyCommand(self._item, p, old_val, new_val)
+                        )
+                    finally:
+                        self._suppress_refresh = False
+
+                try:
+                    w = spec.inspector_widget_factory(
+                        make_port_notify_proxy(port, _notify), on_commit=_commit
+                    )
+                except TypeError:
+                    w = spec.inspector_widget_factory(make_port_notify_proxy(port, _notify))
                 if w is not None:
+                    w.setMaximumWidth(_MAX_WIDGET_W)
                     rl.addWidget(w, 1)
                     return row
-            if port.port_type == PortType.BOOL:
-                btn = QPushButton("True" if bool(port.value) else "False")
-                btn.setFixedHeight(20)
-                btn.setMaximumWidth(_MAX_WIDGET_W)
-                btn.setStyleSheet(NODE_BOOL_STYLE)
-                btn.clicked.connect(lambda _=False, p=pname, b=btn: self._on_bool_clicked(p, b))
-                rl.addWidget(btn, 1)
-            elif port.port_type == PortType.ENUM:
+
+            if port.port_type == "enum":
                 v = port.value
                 display = str(v) if v is not None else "Select..."
                 text = display[:24] + "…" if len(display) > 25 else display
@@ -381,28 +384,6 @@ class SelectedNodePanel(QWidget):
                 btn.setProperty("widget_type", "enum")
                 btn.clicked.connect(lambda _=False, p=pname, b=btn: self._on_enum_clicked(p, b))
                 rl.addWidget(btn, 1)
-            elif port.port_type == PortType.FILE:
-                edit = QLineEdit(str(port.value or ""))
-                edit.setStyleSheet(EDIT_STYLE)
-                edit.setMaximumWidth(_MAX_WIDGET_W)
-                edit.setProperty("port_name", pname)
-                edit.setProperty("original_val", port.value)
-                edit.editingFinished.connect(lambda e=edit: self._on_lineedit_finished(e))
-                btn = QPushButton("…")
-                btn.setFixedWidth(28)
-                btn.clicked.connect(lambda _=False, e=edit, pn=pname: self._browse_file(pn, e))
-                rl.addWidget(edit, 1)
-                rl.addWidget(btn)
-            elif port.port_type in (PortType.STRING, PortType.INT, PortType.FLOAT):
-                v = port.value
-                val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
-                edit = QLineEdit(val_str)
-                edit.setStyleSheet(EDIT_STYLE)
-                edit.setMaximumWidth(_MAX_WIDGET_W)
-                edit.setProperty("port_name", pname)
-                edit.setProperty("original_val", port.value)
-                edit.editingFinished.connect(lambda e=edit: self._on_lineedit_finished(e))
-                rl.addWidget(edit, 1)
             else:
                 le = QLabel("(Connection Required)")
                 le.setStyleSheet(_CONN_HINT_STYLE)
@@ -443,12 +424,9 @@ class SelectedNodePanel(QWidget):
         new_val = edit.text()
         old_val = edit.property("original_val")
         try:
-            if port.port_type == PortType.FLOAT:
-                is_same = abs(float(port.value or 0) - float(new_val or 0)) < 1e-7
-            elif port.port_type == PortType.INT:
-                is_same = int(port.value or 0) == int(new_val or 0)
-            else:
-                is_same = str(port.value) == new_val
+            spec = _get_type_spec(port.port_type)
+            is_same = (spec.values_equal(port.value, new_val) if spec and spec.values_equal
+                       else str(port.value) == new_val)
         except (ValueError, TypeError):
             is_same = str(port.value) == new_val
         if is_same:

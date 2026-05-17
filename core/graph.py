@@ -242,7 +242,7 @@ class Graph:
                 n.graph = self
                 self.nodes[n.id] = n
             else:
-                _logger.warning(f"Unknown node type '{nd.get('type')}' — skipped")
+                _logger.warning(f"Unknown node type '{nd.get('type')}' - skipped")
 
         # Synchronize dynamic ports for all nodes before processing connections
         for node in self.nodes.values():
@@ -253,7 +253,7 @@ class Graph:
 
         _logger.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
 
-        # Signal bulk load complete — scene subscribes to this and rebuilds
+        # Signal bulk load complete - scene subscribes to this and rebuilds
         self.bus.emit(GraphLoadedEvent())
 
     def save(self, path: str | Path) -> None:

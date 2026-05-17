@@ -21,7 +21,7 @@ _NAN = "NaN"
 
 
 class _ItemWidget(QWidget):
-    """Item widget for plugin rows — does NOT block mouse events so checkboxes are clickable."""
+    """Item widget for plugin rows - does NOT block mouse events so checkboxes are clickable."""
     def __init__(self, plugin: dict, on_click) -> None:
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)

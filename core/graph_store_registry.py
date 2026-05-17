@@ -8,9 +8,9 @@ if TYPE_CHECKING:
 class GraphStoreSpec:
     """Describes one named data collection that lives in graph.ext_stores.
 
-    load(data) -> dict       — read from raw JSON, return {ext_key: value, ...}
-    dump(graph) -> dict      — read from graph, return {json_key: value, ...}
-    execution_volatile=True  — store is saved/restored around graph execution
+    load(data) -> dict       - read from raw JSON, return {ext_key: value, ...}
+    dump(graph) -> dict      - read from graph, return {json_key: value, ...}
+    execution_volatile=True  - store is saved/restored around graph execution
     """
     def __init__(
         self,
@@ -48,7 +48,7 @@ def get_volatile_store_specs() -> list[GraphStoreSpec]:
     return [s for s in _specs.values() if s.execution_volatile]
 
 
-# Built-in stores — mirrors what GraphState used to hardcode
+# Built-in stores - mirrors what GraphState used to hardcode
 register_graph_store(GraphStoreSpec(
     key="variables",
     default=dict,

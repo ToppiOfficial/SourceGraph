@@ -73,7 +73,7 @@ class AssetFinderDialog(QDialog):
         remaining = len(self.missing_paths) - found
         self.info_label.setText(
             f"Missing: {len(self.missing_paths)}  |  Found: {found}  |  Remaining: {remaining}"
-            + ("  —  Double-click a row to locate it manually." if remaining else "")
+            + ("  -  Double-click a row to locate it manually." if remaining else "")
         )
         self.apply_btn.setEnabled(found > 0)
 

@@ -641,7 +641,7 @@ QLineEdit {{
 """
 
 # -- File Type Colors ----------------------------------------------------------
-# Extension → icon tint color. Edit here to affect all panels.
+# Extension -> icon tint color. Edit here to affect all panels.
 FILE_TYPE_COLORS: dict[str, str] = {
     # QC / model source
     ".qc":   "#f4a261",

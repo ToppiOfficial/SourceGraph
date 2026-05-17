@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
     def set_external_state(self, state: dict) -> None:
         exec_p = self.panel_manager.get_widget("ExecutionDock")
         if exec_p:
-            # Preserve checkbox state — checked/unchecked is not undoable
+            # Preserve checkbox state - checked/unchecked is not undoable
             saved_disabled = {s.name: set(s.disabled_nodes) for s in exec_p.sessions.values()}
             exec_p.set_project_state(state.get("execution", []))
             for s in exec_p.sessions.values():
@@ -867,7 +867,7 @@ class MainWindow(QMainWindow):
                 name = _package_name(spec)
                 found, ver = is_in_main_venv(name)
                 if found:
-                    # Main venv has this package — skip install, it will be used.
+                    # Main venv has this package - skip install, it will be used.
                     log.info(
                         f"[Packages] '{plugin_name}' requires {spec}; "
                         f"using main-venv version {ver} (skipping install)."
@@ -910,8 +910,28 @@ class MainWindow(QMainWindow):
                 )
             QApplication.processEvents()
 
+    def _load_builtin_types(self) -> None:
+        """Load built-in port type registrations from the types/ directory."""
+        import importlib.util
+        types_dir = Path(__file__).parent.parent / "types"
+        if not types_dir.is_dir():
+            return
+        for py_file in sorted(types_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            module_name = f"builtin_type_{py_file.stem}"
+            try:
+                spec = importlib.util.spec_from_file_location(module_name, py_file)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+            except Exception as exc:
+                print(f"[BuiltinTypes] Failed to load '{py_file.name}': {exc}")
+
     def _load_plugins(self) -> None:
         """Discover and load plugins from the plugins/ directory."""
+        self._load_builtin_types()
         plugins_dir = Path(__file__).parent.parent / "plugins"
         loaded = PluginLoader(get_default_registry()).discover(plugins_dir, disabled=self._disabled_plugins)
         if loaded:

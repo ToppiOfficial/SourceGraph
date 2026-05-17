@@ -18,7 +18,7 @@ from PySide6.QtCore    import Qt, QPointF, QPoint, Signal, QRectF, QTimer, QProp
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from core.graph import Graph, Connection
-from core.node import PortType, port_uses_graph_variables
+from core.node import port_uses_graph_variables
 from core.history import create_history_manager, HistoryManager
 from core.events import (
     NodeAddedEvent, NodeRemovedEvent,
@@ -259,7 +259,7 @@ class NodeEditorScene(QGraphicsScene):
         self._undo_manager.set_node_registry(NODE_CLASS_MAPPINGS)
 
         # Wire auto-capture: from this point every graph_changed emission is
-        # tracked automatically — no per-panel or per-node boilerplate needed.
+        # tracked automatically - no per-panel or per-node boilerplate needed.
         self._undo_manager.attach(self)
 
         self.undo_stack = self._undo_manager.undo_stack
@@ -567,7 +567,7 @@ class NodeEditorScene(QGraphicsScene):
             proxy.inputs["graph_path"].value = path
             proxy.on_property_changed()
             proxy.x, proxy.y = avg_pos.x(), avg_pos.y()
-            self.add_node(proxy)  # pushes AddNodeCommand → _on_node_added creates item
+            self.add_node(proxy)  # pushes AddNodeCommand -> _on_node_added creates item
 
             for pname, ext_nid, ext_port in parent_in:
                 existing = self.graph.get_input_connection(proxy.id, pname)
@@ -742,7 +742,7 @@ class NodeEditorScene(QGraphicsScene):
         dp = dst_ni.port_item(conn.dst_port)
         if not (sp and dp):
             return None
-        ci = ConnectionItem(sp.scene_center(), dp.scene_center())
+        ci = ConnectionItem(sp.scene_center(), dp.scene_center(), src_port_type=sp.port.port_type)
         self._conn_items.append((conn, ci))
         self.addItem(ci)
         dst_ni.set_port_connected(conn.dst_port, True, sp.port.port_type)
@@ -832,11 +832,11 @@ class NodeEditorScene(QGraphicsScene):
                             self._moving_conn = (conn, ci_to_delete)
                             ci_to_delete.hide()
                             self._drag_port = src_port_item
-                            self._drag_conn = ConnectionItem(src_port_item.scene_center())
+                            self._drag_conn = ConnectionItem(src_port_item.scene_center(), src_port_type=src_port_item.port.port_type)
                             self.addItem(self._drag_conn)
                             return
                 self._drag_port = port_item
-                self._drag_conn = ConnectionItem(port_item.scene_center())
+                self._drag_conn = ConnectionItem(port_item.scene_center(), src_port_type=port_item.port.port_type)
                 self.addItem(self._drag_conn)
                 return
 
@@ -1382,7 +1382,7 @@ class NodeEditorView(SafeGraphicsView):
                     # Start wire creation from this input port
                     scene = self.scene()
                     scene._drag_port = item
-                    scene._drag_conn = ConnectionItem(item.scene_center())
+                    scene._drag_conn = ConnectionItem(item.scene_center(), src_port_type=item.port.port_type)
                     scene.addItem(scene._drag_conn)
                     # Set the wire as active selection for immediate dragging
                     scene._drag_conn.setSelected(True)

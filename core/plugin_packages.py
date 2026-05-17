@@ -78,10 +78,10 @@ def is_in_main_venv(package_name: str) -> tuple[bool, str]:
 def detect_plugin_conflicts(plugin_reqs: dict[str, list[str]]) -> list[str]:
     """Detect version conflicts between enabled plugins.
 
-    *plugin_reqs* maps plugin name → list of requirement specs.
+    *plugin_reqs* maps plugin name -> list of requirement specs.
     Returns a list of human-readable warning strings, one per conflicting package.
     """
-    # pkg_name → [(plugin_name, full_spec), ...]
+    # pkg_name -> [(plugin_name, full_spec), ...]
     seen: dict[str, list[tuple[str, str]]] = {}
     for plugin_name, specs in plugin_reqs.items():
         for spec in specs:
@@ -155,7 +155,7 @@ def add_packages_to_path(packages_dir: Path) -> None:
 
 
 def normalize_addonid(raw: str) -> str:
-    """Return a normalized addonid: lowercase, only [a-z0-9_-], spaces → '_'."""
+    """Return a normalized addonid: lowercase, only [a-z0-9_-], spaces -> '_'."""
     s = raw.lower().replace(" ", "_")
     return re.sub(r"[^a-z0-9_-]", "", s)
 

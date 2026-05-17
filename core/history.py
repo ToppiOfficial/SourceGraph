@@ -133,7 +133,7 @@ class HistoryCommand(QUndoCommand):
                 if scene and hasattr(scene, "_rebuild_from_graph"):
                     scene._rebuild_from_graph(selected)
 
-                # Snapshot IS the new committed state — no re-capture needed.
+                # Snapshot IS the new committed state - no re-capture needed.
                 mgr._committed = snapshot
 
         finally:

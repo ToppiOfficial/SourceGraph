@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QFileDialog
 
-from core.node import BaseNode, Port, PortType, parse_type, In, Out
+from core.node import BaseNode, Port, parse_type, In, Out
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
 from core.file_picker_registry import get_file_picker
 from nodes import NODE_CLASS_MAPPINGS
@@ -70,7 +70,7 @@ class SubgraphNode(BaseNode):
                     resolved_in_names[nd["id"]] = resolved_name
                     new_in_names.add(resolved_name)
                     if resolved_name not in self.inputs:
-                        p = Port(name=resolved_name, is_input=True, port_type=PortType.ANY, node_id=self.id)
+                        p = Port(name=resolved_name, is_input=True, port_type="any", node_id=self.id)
                         self.inputs[resolved_name] = p
                         
                 elif nd["type"] == "SubgraphOutputNode":
@@ -140,7 +140,7 @@ class SubgraphNode(BaseNode):
                         break
         
         # Default to ANY if we can't determine the type
-        return PortType.ANY
+        return "any"
 
     def create_widget_for_port(self, port):
         if port.name != "graph_path":

@@ -3,16 +3,17 @@ import os
 from typing import Any
 from PySide6.QtWidgets import (QGraphicsItem, QGraphicsProxyWidget, QLineEdit, QWidget,
                                 QHBoxLayout, QFileDialog, QComboBox, QGraphicsEllipseItem,
-                                QPushButton, QApplication, QTextEdit)
+                                QPushButton, QApplication)
 from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPath, QFontMetrics)
 from PySide6.QtCore    import Qt, QRectF, QPointF, QTimer
 
-from core.node import BaseNode, Port, PortType, PORT_COLORS, port_uses_graph_variables, _coerce
+from core.node import BaseNode, Port, port_uses_graph_variables, _coerce
 from core.port_type_registry import (
     get_color as _get_port_color,
     is_editable as _type_editable,
     get_port_type_spec as _get_type_spec,
 )
+from core.registry import get_default_registry as _get_registry
 from core.file_picker_registry import get_file_picker
 from gui.theme import *
 from gui.widgets.basic_shapes import ShapeDrawer
@@ -28,6 +29,7 @@ PR        = 6    # port radius
 PAD       = 8    # inner horizontal padding
 MIN_W     = 120
 LABEL_MAXSPACE_GAP = 40
+PLUGIN_LABEL_H = 14
 
 def _port_is_editable(port_type) -> bool:
     return _type_editable(port_type)
@@ -42,32 +44,53 @@ _ARC_R    = 20.0   # radius of the port fan arc (px)
 _ARC_STEP = 24.0   # degrees between adjacent ports
 
 def _folded_height(n: int) -> float:
-    """Minimum height for a folded node to fan n ports with arc spacing."""
+    """Minimum height for a folded node to distribute n ports along the border."""
     if n <= 1:
         return float(TITLE_H)
-    max_angle = ((n - 1) / 2.0) * _ARC_STEP
-    half = _ARC_R * _math.sin(_math.radians(max_angle)) + PR + 4
-    return max(float(TITLE_H), 2.0 * half)
+    r          = _ARC_R
+    step       = r * _math.radians(_ARC_STEP)   # arc-length spacing ≈ 8.38 px
+    corner_arc = _math.pi * r / 2.0             # quarter-circle arc length
+    straight   = max(0.0, (n - 1) * step - 2.0 * corner_arc)
+    return max(float(TITLE_H), 2.0 * r + straight)
 
-def _folded_arc_pos(idx: int, count: int, side: str, h: float, w: float):
-    """(x, y) for port[idx] of `count` ports on a circular arc.
 
-    side='right'  → output ports, arc opens rightward from the right edge.
-    side='left'   → input ports,  arc opens leftward from the left edge.
-    """
+def _folded_border_pos(idx: int, count: int, side: str, h: float, w: float):
+    r          = _ARC_R
+    corner_arc = _math.pi * r / 2.0
+    straight   = max(0.0, h - 2.0 * r)
+    total      = 2.0 * corner_arc + straight
+
+    t_center = total / 2.0
+
     if count <= 1:
-        angle_deg = 0.0
+        x = 0.0
+        y = h / 2.0
+        if side == 'right':
+            x = w - x
+        return x, y
+
+    # Evenly distribute ports across the full border length
+    # Add padding so ports don't sit right on the corners
+    padding = corner_arc * 0.5
+    usable  = total - 2.0 * padding
+    step    = usable / (count - 1)
+    t       = padding + idx * step
+
+    if t <= corner_arc:
+        alpha = (t / corner_arc) * (_math.pi / 2.0)
+        x = r - r * _math.sin(alpha)
+        y = r - r * _math.cos(alpha)
+    elif t <= corner_arc + straight:
+        x = 0.0
+        y = r + (t - corner_arc)
     else:
-        span = (count - 1) * _ARC_STEP
-        angle_deg = -span / 2.0 + idx * _ARC_STEP
-    a = _math.radians(angle_deg)
-    cy = h / 2.0
-    if side == "right":
-        cx = w - _ARC_R
-        return cx + _ARC_R * _math.cos(a), cy + _ARC_R * _math.sin(a)
-    else:
-        cx = _ARC_R
-        return cx - _ARC_R * _math.cos(a), cy + _ARC_R * _math.sin(a)
+        alpha = ((t - corner_arc - straight) / corner_arc) * (_math.pi / 2.0)
+        x = r - r * _math.cos(alpha)
+        y = (h - r) + r * _math.sin(alpha)
+
+    if side == 'right':
+        x = w - x
+    return x, y
 
 
 class PortItem(QGraphicsEllipseItem):
@@ -80,7 +103,7 @@ class PortItem(QGraphicsEllipseItem):
         self.setZValue(2)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CrossCursor)
-        type_name = port.port_type.name.upper() if hasattr(port.port_type, "name") else str(port.port_type).upper()
+        type_name = port.port_type.upper()
         self.setToolTip(f"{port.name} <{type_name}>")
 
     def set_highlight(self, enabled: bool, is_valid: bool = True) -> None:
@@ -117,13 +140,13 @@ class PortItem(QGraphicsEllipseItem):
         self._apply_color(self._base_color)
         super().hoverLeaveEvent(event)
 
-    def set_connected_color(self, source_port_type: PortType | None) -> None:
+    def set_connected_color(self, source_port_type: str | None) -> None:
         """Update port color to match the connected source port type.
-        
+
         When connected, ANY type ports take on the color of the source port.
         When disconnected, they revert to their original base color.
         """
-        if source_port_type is not None and self.port.port_type == PortType.ANY:
+        if source_port_type is not None and self.port.port_type == "any":
             color = QColor(_get_port_color(source_port_type))
             self._base_color = color
             self._apply_color(color)
@@ -224,6 +247,9 @@ class NodeItem(QGraphicsItem):
         node_default_w = getattr(node, 'default_width', None) or DEFAULT_W
         self._w = node.width if node.width is not None else node_default_w
 
+        _src = _get_registry().get_source(node.__class__.__name__)
+        self._plugin_source: str | None = _src[7:] if (_src and _src.startswith("plugin:")) else None
+
         # For folded nodes, always calculate appropriate folded height
         # Ignore saved height as it might be from unfolded state
         if self.node.folded:
@@ -231,7 +257,7 @@ class NodeItem(QGraphicsItem):
         else:
             calc_h = self._calculate_height()
             self._h = max(calc_h, node.height) if node.height is not None else calc_h
-        
+
         # Height saved before folding so unfolding restores user-resized dimensions.
         self._unfolded_height: float | None = None
 
@@ -316,7 +342,10 @@ class NodeItem(QGraphicsItem):
             else:
                 h += ROW_H
         h += below_extra
-        return max(h, TITLE_H + ROW_H) + PAD
+        base = max(h, TITLE_H + ROW_H) + PAD
+        if getattr(self, '_plugin_source', None):
+            base += PLUGIN_LABEL_H
+        return base
 
     def _calculate_ideal_label_width(self) -> float:
         """Calculate the width needed for the longest visible input label."""
@@ -372,7 +401,7 @@ class NodeItem(QGraphicsItem):
 
             for i, (name, port) in enumerate(visible_outputs):
                 pi = PortItem(port, self)
-                x, y = _folded_arc_pos(i, len(visible_outputs), "right", arc_h, self._w)
+                x, y = _folded_border_pos(i, len(visible_outputs), "right", arc_h, self._w)
                 pi.setPos(x, y)
                 self._port_items[name] = pi
             # _output_port_names must include ALL output names (visible or not) for _update_ports
@@ -381,7 +410,7 @@ class NodeItem(QGraphicsItem):
 
             for i, (name, port) in enumerate(visible_inputs):
                 pi = PortItem(port, self)
-                x, y = _folded_arc_pos(i, len(visible_inputs), "left", arc_h, self._w)
+                x, y = _folded_border_pos(i, len(visible_inputs), "left", arc_h, self._w)
                 pi.setPos(x, y)
                 self._port_items[name] = pi
             return  # no proxy widgets when folded
@@ -494,123 +523,24 @@ class NodeItem(QGraphicsItem):
     
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
+        from core.port_type_registry import make_port_notify_proxy
+        node_id = self.node.id
+        def _notify(nid=node_id):
+            sc = self.scene()
+            if sc:
+                sc._after_node_mutation(nid)
+                sc._emit_graph_changed()
+
+        # Non-bool ports with an explicit options list use the enum canvas widget.
+        if port.enum_options is not None and port.port_type != "bool":
+            enum_spec = _get_type_spec("enum")
+            if enum_spec and enum_spec.canvas_widget_factory:
+                return enum_spec.canvas_widget_factory(make_port_notify_proxy(port, _notify), parent)
+
         spec = _get_type_spec(port.port_type)
         if spec and spec.canvas_widget_factory is not None:
-            from core.port_type_registry import make_port_notify_proxy
-            node_id = self.node.id
-            def _notify(nid=node_id):
-                sc = self.scene()
-                if sc:
-                    sc._after_node_mutation(nid)
-                    sc._emit_graph_changed()
             return spec.canvas_widget_factory(make_port_notify_proxy(port, _notify), parent)
-
-        if port.port_type == PortType.BOOL:
-            toggle = QPushButton(parent)
-            toggle.setFixedHeight(20)
-            toggle.setText(f"{'True' if bool(port.value) else 'False'}")
-            toggle.setStyleSheet(NODE_BOOL_STYLE)
-            toggle.setFocusPolicy(Qt.NoFocus)
-            return toggle
-            
-        elif port.port_type == PortType.ENUM or port.enum_options is not None:
-            # Search-based button instead of clunky dropdown
-            btn = QPushButton(parent)
-            btn.setFixedHeight(22)
-            btn.setStyleSheet(NODE_ENUM_BTN_STYLE)
-            
-            v = port.value
-            btn.setText(_elide(str(v) if v is not None else "Select...", 25))
-            btn.setProperty("widget_type", "enum")
-            
-            return btn
-            
-        elif port.port_type in (PortType.INT, PortType.FLOAT):
-            # Container for +/- buttons
-            container = QWidget(parent)
-            container.setFixedHeight(22)
-            container.setObjectName("NumberInputContainer")
-            container.setStyleSheet(NUMBER_INPUT_STYLE)
-            
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
-            
-            btn_minus = QPushButton("-", container)
-            btn_minus.setFixedSize(20, 20)
-            btn_minus.setStyleSheet(NODE_NUMBER_BTN_STYLE)
-            btn_minus.setFocusPolicy(Qt.NoFocus)
-            
-            edit = QLineEdit(container)
-            edit.setFixedHeight(20)
-            edit.setStyleSheet("QLineEdit { background: transparent; border: none; font-size: 11px; padding: 0px; }")
-            edit.setAlignment(Qt.AlignCenter)
-            
-            v = port.value
-            val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
-            edit.setText(val_str)
-            edit.setProperty("original_val", port.value)
-            
-            btn_plus = QPushButton("+", container)
-            btn_plus.setFixedSize(20, 20)
-            btn_plus.setStyleSheet(NODE_NUMBER_BTN_STYLE)
-            btn_plus.setFocusPolicy(Qt.NoFocus)
-            
-            layout.addWidget(btn_minus)
-            layout.addWidget(edit)
-            layout.addWidget(btn_plus)
-            
-            container.setProperty("widget_type", "number")
-            container.number_edit = edit
-            container.btn_minus = btn_minus
-            container.btn_plus = btn_plus
-            
-            return container
-            
-        elif port.port_type == PortType.FILE:
-            container = QWidget(parent)
-            container.setFixedHeight(22)
-            container.setObjectName("NumberInputContainer")
-            container.setStyleSheet(NUMBER_INPUT_STYLE)
-
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
-
-            edit = QLineEdit(container)
-            edit.setFixedHeight(20)
-            edit.setStyleSheet(
-                "QLineEdit { background: transparent; border: none; font-size: 11px; padding: 0px 4px; }"
-            )
-            v = port.value
-            edit.setText(str(v) if v is not None else "")
-            edit.setProperty("original_val", port.value)
-
-            btn = QPushButton("...", container)
-            btn.setFixedSize(24, 20)
-            btn.setStyleSheet(NODE_NUMBER_BTN_STYLE)
-            btn.setFocusPolicy(Qt.NoFocus)
-
-            layout.addWidget(edit, 1)
-            layout.addWidget(btn)
-
-            container.setProperty("widget_type", "file")
-            container.file_edit = edit
-            container.browse_btn = btn
-            return container
-
-        else:
-            # Text input for STRING, ANY, etc.
-            edit = QLineEdit(parent)
-            edit.setFixedHeight(22)
-            edit.setStyleSheet(NODE_WIDGET_STYLE)
-
-            v = port.value
-            val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
-            edit.setText(val_str)
-            edit.setProperty("original_val", port.value)
-
-            return edit
+        return None
 
     def _create_proxy(self, container: QWidget, current_y: float) -> QGraphicsProxyWidget:
         """Helper to finalize proxy placement."""
@@ -660,15 +590,12 @@ class NodeItem(QGraphicsItem):
 
         old_val = edit.property("original_val")
 
-        # Skip if unchanged — compare against value when editing started (old_val), not current
+        # Skip if unchanged - compare against value when editing started (old_val), not current
         # port.value, which textChanged may have already updated to new_val
         try:
-            if port.port_type == PortType.FLOAT:
-                is_same = abs(float(old_val or 0) - float(new_val or 0)) < 1e-7
-            elif port.port_type == PortType.INT:
-                is_same = int(old_val or 0) == int(new_val or 0)
-            else:
-                is_same = str(old_val if old_val is not None else "") == new_val
+            spec = _get_type_spec(port.port_type)
+            is_same = (spec.values_equal(old_val, new_val) if spec and spec.values_equal
+                       else str(old_val if old_val is not None else "") == new_val)
         except (ValueError, TypeError):
             is_same = str(old_val if old_val is not None else "") == new_val
 
@@ -705,7 +632,7 @@ class NodeItem(QGraphicsItem):
     def dropEvent(self, event) -> None:
         path = event.mimeData().text()
         for name, port in self.node.inputs.items():
-            if port.port_type == PortType.ENUM and port.enum_options is None:
+            if port.port_type == "enum" and port.enum_options is None:
                 proxy = self._proxies.get(name)
                 if proxy:
                     combo = proxy.widget().findChild(QComboBox)
@@ -720,20 +647,11 @@ class NodeItem(QGraphicsItem):
 
     # -- validation ------------------------------------------------------------
 
-    def _validate_value(self, port_type: PortType, text: str) -> str | None:
+    def _validate_value(self, port_type: str, text: str) -> str | None:
         if not text:
             return None
-        try:
-            if port_type == PortType.INT:
-                int(text)
-            elif port_type == PortType.FLOAT:
-                float(text)
-            elif port_type == PortType.BOOL:
-                if text.lower() not in ("true", "1", "yes", "false", "0", "no"):
-                    raise ValueError
-        except ValueError:
-            return f"'{text}' is not a valid {port_type.value}"
-        return None
+        spec = _get_type_spec(port_type)
+        return spec.validate_text(text) if spec and spec.validate_text else None
 
     def _browse_file(self, port_name: str, edit: QLineEdit) -> None:
         path, _ = QFileDialog.getOpenFileName(None, "Select File", "", "All Files (*)")
@@ -901,7 +819,7 @@ class NodeItem(QGraphicsItem):
                 else:
                     options = assets
         
-        # These imports are inline to avoid circular import via file_search_dialog → main_window
+        # These imports are inline to avoid circular import via file_search_dialog -> main_window
         from gui.menu.file_search_dialog import GenericSelectionDialog
         from gui.main_window import MainWindow
         mw = next((w for w in QApplication.topLevelWidgets() if isinstance(w, MainWindow)), None)
@@ -936,21 +854,13 @@ class NodeItem(QGraphicsItem):
         if not port:
             return
         
-        # Convert string value based on port type
-        if port.port_type == PortType.INT:
-            try:
-                port.value = int(new_value)
-            except ValueError:
-                pass
-        elif port.port_type == PortType.FLOAT:
-            try:
-                port.value = float(new_value)
-            except ValueError:
-                pass
-        else:
-            port.value = new_value
+        spec = _get_type_spec(port.port_type)
+        try:
+            port.value = spec.coerce_text(new_value) if spec and spec.coerce_text else new_value
+        except (ValueError, TypeError):
+            pass
         
-        # Trigger graph update — skip for dynamic ports to avoid refresh mid-type
+        # Trigger graph update - skip for dynamic ports to avoid refresh mid-type
         scene = self.scene()
         if scene and not (port and port.is_dynamic):
             scene._after_node_mutation(self.node.id)
@@ -984,11 +894,11 @@ class NodeItem(QGraphicsItem):
             
         step = port.number_increment
         if step is None:
-            step = 1.0 if port.port_type == PortType.INT else 0.1
-            
+            step = 1.0 if port.port_type == "int" else 0.1
+
         new_val = current + (direction * step)
-        
-        if port.port_type == PortType.INT:
+
+        if port.port_type == "int":
             new_val = int(round(new_val))
         else:
             # Avoid floating point precision issues for small steps
@@ -1111,14 +1021,14 @@ class NodeItem(QGraphicsItem):
             for i, (name, port) in enumerate(visible_outputs):
                 pi = self._port_items.get(name)
                 if pi:
-                    x, y = _folded_arc_pos(i, len(visible_outputs), "right", arc_h, self._w)
+                    x, y = _folded_border_pos(i, len(visible_outputs), "right", arc_h, self._w)
                     pi.setPos(x, y)
-            
+
             # Update input ports with new arc positions
             for i, (name, port) in enumerate(visible_inputs):
                 pi = self._port_items.get(name)
                 if pi:
-                    x, y = _folded_arc_pos(i, len(visible_inputs), "left", arc_h, self._w)
+                    x, y = _folded_border_pos(i, len(visible_inputs), "left", arc_h, self._w)
                     pi.setPos(x, y)
             return
         for name in self._output_port_names:
@@ -1163,7 +1073,7 @@ class NodeItem(QGraphicsItem):
     def port_item(self, name: str) -> PortItem | None:
         return self._port_items.get(name)
 
-    def set_port_connected(self, port_name: str, connected: bool, source_port_type: PortType | None = None) -> None:
+    def set_port_connected(self, port_name: str, connected: bool, source_port_type: str | None = None) -> None:
         proxy = self._proxies.get(port_name)
         if proxy:
             if not self.node.has_gui_builder(port_name):
@@ -1190,7 +1100,7 @@ class NodeItem(QGraphicsItem):
                 continue
             if sc and hasattr(sc, "graph"):
                 if sc.graph.get_input_connection(self.node.id, pname):
-                    continue  # connected — satisfied
+                    continue  # connected - satisfied
             val = port.value
             if val is None or str(val).strip() == "":
                 return True
@@ -1199,28 +1109,7 @@ class NodeItem(QGraphicsItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         # Use proportional roundness for folded nodes based on port count
         if self.node.folded:
-            # Count visible ports
-            visible_outputs = sum(1 for p in self.node.outputs.values() if p.allow_connection)
-            visible_inputs = sum(1 for p in self.node.inputs.values()
-                               if p.allow_connection)
-            total_ports = max(visible_outputs, visible_inputs)
-            
-            # Mathematical ratio: map port count (1-10) to roundness (6-20)
-            # Using logarithmic scaling for smooth progression
-            min_ports, max_ports = 1, 10
-            min_radius, max_radius = 6, 20
-
-            if total_ports <= min_ports:
-                r = min_radius
-            elif total_ports >= max_ports:
-                r = max_radius
-            else:
-                # Logarithmic interpolation for smooth scaling
-                log_min = _math.log(min_ports)
-                log_max = _math.log(max_ports)
-                log_current = _math.log(total_ports)
-                ratio = (log_current - log_min) / (log_max - log_min)
-                r = min_radius + ratio * (max_radius - min_radius)
+            r = min(self._h / 2.0, float(_ARC_R))
         else:
             r = 10
             
@@ -1233,12 +1122,12 @@ class NodeItem(QGraphicsItem):
         body_path.addRoundedRect(body, r, r)
         painter.setClipPath(body_path)
 
-        # Body background — always dark neutral
+        # Body background - always dark neutral
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(NODE_BG))
         painter.drawRect(body)
 
-        # Title bar — use dynamic height for folded nodes to accommodate arc spacing
+        # Title bar - use dynamic height for folded nodes to accommodate arc spacing
         header_color = base_color.darker(HEADER_DARKNESS)
         painter.setBrush(header_color)
         if self.node.folded:
@@ -1327,7 +1216,7 @@ class NodeItem(QGraphicsItem):
         if self.node.folded:
             return  # skip all port label drawing
 
-        # Port labels — always drawn in scene (widgets no longer contain labels)
+        # Port labels - always drawn in scene (widgets no longer contain labels)
         painter.setFont(QFont("Segoe UI", 8))
         label_col = QColor(FG_DEFAULT)
         value_col = QColor(FG_BRIGHT)
@@ -1402,6 +1291,15 @@ class NodeItem(QGraphicsItem):
                                 )
             row_offset_y += ROW_H
 
+        if self._plugin_source:
+            painter.setFont(QFont("Segoe UI", 7))
+            painter.setPen(QColor(FG_DIM))
+            painter.drawText(
+                QRectF(PR + PAD, self._h - PLUGIN_LABEL_H, self._w - 2 * (PR + PAD), PLUGIN_LABEL_H),
+                Qt.AlignVCenter | Qt.AlignLeft,
+                self._plugin_source,
+            )
+
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.node.x = float(self.x())
@@ -1469,14 +1367,14 @@ class NodeItem(QGraphicsItem):
         Direct fold toggle without undo/redo (used as fallback).
         """
         if not old_folded:
-            # About to fold — save the current (possibly user-resized) height
+            # About to fold - save the current (possibly user-resized) height
             self._unfolded_height = self._h
         
         self.node.folded = new_folded
         self.refresh_ports()   # recalculates height, repositions ports, hides proxies
 
         if not new_folded and self._unfolded_height is not None:
-            # Unfolding — restore the saved height instead of the auto-calculated minimum
+            # Unfolding - restore the saved height instead of the auto-calculated minimum
             self.prepareGeometryChange()
             self._h = self._unfolded_height
             self.node.height = self._h

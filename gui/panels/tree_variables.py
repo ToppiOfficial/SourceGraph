@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QKeyEvent, QIcon, QPixmap, QPainter, QColor, QFont
 
 from gui.widgets.basic_shapes import ShapeDrawer
-from core.node import PortType, port_uses_graph_variables
+from core.node import port_uses_graph_variables
 from gui.panels.base_panel import BasePanel
 from gui.panels.base_browser import BaseBrowserWidget, BaseBrowserTree
 from gui.dialogs import RenameDialog
@@ -436,7 +436,7 @@ class VariablesBrowserWidget(BaseBrowserWidget):
         for node in self.main_window.graph.nodes.values():
             touched = False
             for port in node.inputs.values():
-                if port.port_type != PortType.ENUM or port.enum_options is not None:
+                if port.port_type != "enum" or port.enum_options is not None:
                     continue
                 if not port_uses_graph_variables(port):
                     continue
