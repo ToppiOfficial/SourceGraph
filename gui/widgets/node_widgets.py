@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit
 from gui.theme import *
 
@@ -21,6 +22,9 @@ def make_file_picker(label_text: str, on_browse) -> tuple[QWidget, QLabel]:
     btn.clicked.connect(on_browse)
     layout.addWidget(btn)
 
+    container.refresh_value = lambda v, _l=lbl: _l.setText(
+        os.path.basename(str(v)) if v else "Select file…"
+    )
     return container, lbl
 
 
@@ -42,6 +46,7 @@ def make_path_editor(value: str, on_change, on_browse) -> tuple[QWidget, QLineEd
     btn.clicked.connect(on_browse)
     layout.addWidget(btn)
 
+    container.refresh_value = lambda v, _e=edit: _e.setText(str(v) if v else "")
     return container, edit
 
 

@@ -14,4 +14,7 @@ def make_enum_canvas_widget(port, parent=None) -> QPushButton:
     v = port.value
     btn.setText(_elide(str(v) if v is not None else "Select...", 25))
     btn.setProperty("widget_type", "enum")
+    btn.refresh_value = lambda v, _b=btn: _b.setText(
+        _elide(str(v) if v is not None else "Select...", 25)
+    )
     return btn

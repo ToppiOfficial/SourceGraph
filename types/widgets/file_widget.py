@@ -34,6 +34,7 @@ def make_file_canvas_widget(port, parent=None) -> QWidget:
     container.setProperty("widget_type", "file")
     container.file_edit = edit
     container.browse_btn = btn
+    container.refresh_value = lambda v, _e=edit: _e.setText(str(v) if v is not None else "")
     return container
 
 

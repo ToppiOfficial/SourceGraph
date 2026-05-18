@@ -43,6 +43,9 @@ def make_number_canvas_widget(port, parent=None) -> QWidget:
     container.number_edit = edit
     container.btn_minus = btn_minus
     container.btn_plus = btn_plus
+    container.refresh_value = lambda v, _e=edit: _e.setText(
+        f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
+    )
     return container
 
 

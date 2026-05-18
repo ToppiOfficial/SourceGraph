@@ -11,6 +11,9 @@ def make_string_canvas_widget(port, parent=None) -> QLineEdit:
     val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
     edit.setText(val_str)
     edit.setProperty("original_val", port.value)
+    edit.refresh_value = lambda v, _e=edit: _e.setText(
+        f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""
+    )
     return edit
 
 

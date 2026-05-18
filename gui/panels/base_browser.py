@@ -322,6 +322,7 @@ class BaseBrowserWidget(QWidget):
         """Fill menu with folder-specific actions - to be implemented by subclass."""
         raise NotImplementedError("Subclass must implement _fill_folder_menu")
 
+
     def _collect_removed(self, items) -> list:
         """Subclass returns whatever data _notify_removed needs."""
         return []

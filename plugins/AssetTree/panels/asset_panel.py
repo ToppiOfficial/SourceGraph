@@ -188,6 +188,31 @@ class AssetBrowserWidget(BaseBrowserWidget):
         menu.addSeparator()
         menu.addAction("Add Folder...", lambda: self._on_add_subfolder(folder_item))
 
+    def _setup_tree_context_menu(self, tree_widget):
+        def show_context_menu(pos):
+            item = tree_widget.itemAt(pos)
+            menu = QMenu(tree_widget)
+            menu.setStyleSheet(MENU)
+            if item is None:
+                self._fill_menu(menu, None)
+                if menu.actions():
+                    menu.exec(tree_widget.mapToGlobal(pos))
+                return
+            is_folder = item.data(0, tree_widget._T) == "folder"
+            if is_folder:
+                self._fill_folder_menu(menu, item)
+                menu.addSeparator()
+                menu.addAction("Delete", self._on_delete)
+            else:
+                menu.addAction("Replace File...", lambda: self._on_replace_file(item))
+                menu.addSeparator()
+                menu.addAction("Delete", self._on_delete)
+                menu.addAction("Put in Folder", lambda: self._on_context_put_in_folder(tree_widget))
+            menu.exec(tree_widget.mapToGlobal(pos))
+
+        tree_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        tree_widget.customContextMenuRequested.connect(show_context_menu)
+
     def _show_action_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet(MENU)
@@ -331,6 +356,47 @@ class AssetBrowserWidget(BaseBrowserWidget):
                         break
             self._sync_to_graph()
             scene._emit_graph_changed()
+        self.refresh_status()
+
+    def _on_replace_file(self, item: QTreeWidgetItem):
+        old_path = item.text(2)
+        ext = os.path.splitext(old_path)[1]
+        if ext:
+            filter_str = f"{ext[1:].upper()} Files (*{ext});;All Files (*)"
+        else:
+            filter_str = "All Files (*)"
+
+        new_path, _ = QFileDialog.getOpenFileName(
+            self, "Replace File", os.path.dirname(old_path), filter_str,
+        )
+        if not new_path or new_path == old_path:
+            return
+
+        name = os.path.basename(new_path)
+        ext_label = os.path.splitext(new_path)[1][1:].upper() or "FILE"
+
+        with self.main_window.scene._undo_manager.transaction("Replace File"):
+            item.setText(0, name)
+            item.setText(1, ext_label)
+            item.setText(2, new_path)
+            item.setToolTip(0, f"Name: {name}\nPath: {new_path}\nType: {ext_label}")
+            item.setToolTip(1, f"Type: {ext_label}\nPath: {new_path}")
+            item.setToolTip(2, new_path)
+            item.setIcon(0, load_file_icon(new_path))
+
+            scene = self.main_window.scene
+            for node in self.main_window.graph.nodes.values():
+                mutated = False
+                for port in node.inputs.values():
+                    if port.value == old_path:
+                        port.value = new_path
+                        mutated = True
+                if mutated:
+                    scene._after_node_mutation(node.id)
+
+            self._sync_to_graph()
+            scene._emit_graph_changed()
+
         self.refresh_status()
 
     def _put_selected_in_folder(self, tree_widget, selected_items, folder_name):

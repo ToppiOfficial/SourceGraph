@@ -720,11 +720,16 @@ class NodeItem(QGraphicsItem):
 
         self._sync_connection_states()
         for proxy in self._proxies.values():
+            if proxy.widget() is not None:
+                proxy.widget().update()
             proxy.update()
         self.update()
 
     def _update_widget_value(self, widget: QWidget, port: Port):
         """Update widget value based on port type and widget type."""
+        if callable(getattr(widget, 'refresh_value', None)):
+            widget.refresh_value(port.value)
+            return
         if isinstance(widget, QLineEdit):
             v = port.value
             val_str = f"{v:g}" if isinstance(v, float) else str(v) if v is not None else ""

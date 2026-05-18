@@ -12,6 +12,9 @@ def make_bool_canvas_widget(port, parent=None) -> QPushButton:
     btn.setText("True" if is_true else "False")
     btn.setStyleSheet(NODE_BOOL_STYLE)
     btn.setFocusPolicy(Qt.NoFocus)
+    btn.refresh_value = lambda v, _b=btn: _b.setText(
+        "True" if str(v).lower() in ("true", "1", "yes") else "False"
+    )
     return btn
 
 
