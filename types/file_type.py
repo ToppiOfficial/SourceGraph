@@ -13,7 +13,7 @@ def _w(stem: str):
 
 _fw = _w("file_widget")
 
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 register_port_type(PortTypeSpec(
     key="file",
     color="#ce9178",

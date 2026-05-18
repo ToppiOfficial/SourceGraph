@@ -36,7 +36,7 @@ def _coerce_value(value):
         raise ValueError(f"Invalid boolean: '{value}'")
     return bool(value)
 
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 register_port_type(PortTypeSpec(
     key="bool",
     color="#ff8c00",

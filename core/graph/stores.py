@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.graph import Graph
+    from core.graph.graph import Graph
 
 
 class GraphStoreSpec:
@@ -45,10 +45,11 @@ def get_all_store_specs() -> list[GraphStoreSpec]:
 
 
 def get_volatile_store_specs() -> list[GraphStoreSpec]:
+    """Return store specs whose data is saved and restored around each graph execution."""
     return [s for s in _specs.values() if s.execution_volatile]
 
 
-# Built-in stores - mirrors what GraphState used to hardcode
+# Built-in stores
 register_graph_store(GraphStoreSpec(
     key="variables",
     default=dict,

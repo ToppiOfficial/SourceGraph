@@ -213,5 +213,5 @@ def _handle_variable_drop(scene, pos, value, modifiers) -> bool:
     return True
 
 
-from core.drop_registry import register_drop_handler
+from core.registry import register_drop_handler
 register_drop_handler("variable", _handle_variable_drop)

@@ -20,7 +20,7 @@ def _validate(text):
     except ValueError:
         return f"'{text}' is not a valid int"
 
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 register_port_type(PortTypeSpec(
     key="int",
     color="#569cd6",

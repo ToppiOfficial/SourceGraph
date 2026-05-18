@@ -1,4 +1,4 @@
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 
 def _coerce_value(value):
     return value if isinstance(value, list) else [value]

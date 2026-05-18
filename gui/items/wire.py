@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QGraphicsPathItem, QMenu
 from PySide6.QtGui     import QPainterPath, QPainterPathStroker, QPen, QColor, QPolygonF
 from PySide6.QtCore    import QPointF, Qt
 from gui.theme import *
-from core.port_type_registry import get_color as _get_port_color
+from core.registry import get_color as _get_port_color
 
 
 class ConnectionItem(QGraphicsPathItem):

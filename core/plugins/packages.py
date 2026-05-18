@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 import importlib
 import importlib.metadata
-import importlib.util
-import json
 import re
 import sys
 import sysconfig
@@ -13,6 +11,8 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+from core.utils.modules import read_addoninfo
+
 _WHL_DIR = "whl"
 _SAFE_FILENAME_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 
@@ -20,17 +20,9 @@ _SAFE_FILENAME_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 _mounted_packages: set[str] = set()
 
 
-# ---------------------------------------------------------------------------
-# Directory helpers
-# ---------------------------------------------------------------------------
-
 def get_whl_dir(plugin_dir: Path) -> Path:
     return plugin_dir / _WHL_DIR
 
-
-# ---------------------------------------------------------------------------
-# Package name helpers
-# ---------------------------------------------------------------------------
 
 def _normalize_pkg_name(name: str) -> str:
     return name.lower().replace("-", "_").replace(".", "_")
@@ -41,10 +33,6 @@ def _whl_pkg_name(whl_path: Path) -> str:
     return _normalize_pkg_name(whl_path.stem.split("-")[0])
 
 
-# ---------------------------------------------------------------------------
-# addoninfo.json reading
-# ---------------------------------------------------------------------------
-
 def resolve_whl_packages(plugin_dir: Path) -> list[dict]:
     """Return WHL package declarations from addoninfo.json.
 
@@ -52,38 +40,27 @@ def resolve_whl_packages(plugin_dir: Path) -> list[dict]:
     a ``url`` (single string) or ``urls`` (list of strings) key pointing to
     ``.whl`` download locations.  String items (legacy pip specs) are ignored.
     """
-    info_path = plugin_dir / "addoninfo.json"
-    if not info_path.exists():
+    data = read_addoninfo(plugin_dir)
+    pkgs = data.get("packages")
+    if not pkgs or not isinstance(pkgs, list):
         return []
-    try:
-        data = json.loads(info_path.read_text(encoding="utf-8"))
-        pkgs = data.get("packages")
-        if not pkgs or not isinstance(pkgs, list):
-            return []
-        result: list[dict] = []
-        for p in pkgs:
-            if not isinstance(p, dict) or not p.get("name"):
-                continue
-            # Normalize url / urls into a single list.
-            raw_urls = p.get("urls") or []
-            if isinstance(raw_urls, str):
-                raw_urls = [raw_urls]
-            single = p.get("url") or ""
-            if single and single not in raw_urls:
-                raw_urls = [single] + list(raw_urls)
-            result.append({
-                "name": str(p["name"]),
-                "urls": [str(u) for u in raw_urls if u],
-                "sha256": p.get("sha256") or {},
-            })
-        return result
-    except Exception:
-        return []
+    result: list[dict] = []
+    for p in pkgs:
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        raw_urls = p.get("urls") or []
+        if isinstance(raw_urls, str):
+            raw_urls = [raw_urls]
+        single = p.get("url") or ""
+        if single and single not in raw_urls:
+            raw_urls = [single] + list(raw_urls)
+        result.append({
+            "name": str(p["name"]),
+            "urls": [str(u) for u in raw_urls if u],
+            "sha256": p.get("sha256") or {},
+        })
+    return result
 
-
-# ---------------------------------------------------------------------------
-# WHL file lookup
-# ---------------------------------------------------------------------------
 
 def find_whl_for_package(pkg_name: str, whl_dir: Path) -> Path | None:
     """Return the first WHL file in *whl_dir* whose name matches *pkg_name*, or None."""
@@ -104,15 +81,10 @@ def _find_all_whls_for_package(pkg_name: str, whl_dir: Path) -> list[Path]:
     return sorted(whl for whl in whl_dir.glob("*.whl") if _whl_pkg_name(whl) == norm)
 
 
-# ---------------------------------------------------------------------------
-# Platform / Python compatibility scoring
-# ---------------------------------------------------------------------------
-
 def _current_tags() -> tuple[str, str]:
     """Return (python_tag, platform_tag) for the running interpreter."""
     py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
     plat_raw = sysconfig.get_platform()
-    # Normalize: replace '-' and '.' with '_'
     plat_tag = re.sub(r"[-.]", "_", plat_raw)
     return py_tag, plat_tag
 
@@ -128,7 +100,6 @@ def _score_whl_url(url: str, py_tag: str, plat_tag: str) -> int:
     if not filename.lower().endswith(".whl"):
         return 0
     parts = Path(filename).stem.split("-")
-    # WHL stem: name-version[-build]-pytag-abitag-platform
     if len(parts) < 5:
         return 0
     whl_py = parts[-3].lower()
@@ -136,7 +107,7 @@ def _score_whl_url(url: str, py_tag: str, plat_tag: str) -> int:
 
     py_match = (
         whl_py == py_tag
-        or whl_py.startswith("py")  # pure-python: py3, py2, py2.py3
+        or whl_py.startswith("py")
         or whl_py == "none"
         or whl_py == "cp3"
     )
@@ -166,22 +137,17 @@ def select_compatible_whl_url(urls: list[str]) -> str | None:
     return best_url if best_score > 0 else None
 
 
-# ---------------------------------------------------------------------------
-# Mounting
-# ---------------------------------------------------------------------------
-
 def mount_plugin_whls(plugin_dir: Path) -> list[str]:
     """Mount all ``.whl`` files from *plugin_dir*/whl/ into ``sys.path``.
 
     Priority rules
     --------------
-    * App / main-venv packages always win - any WHL whose package is already
+    * App / main-venv packages always win — any WHL whose package is already
       importable via the main environment is skipped.
-    * First-mounted plugin wins - if a previous plugin already claimed a
+    * First-mounted plugin wins — if a previous plugin already claimed a
       package name the WHL is silently skipped.
-    * Multiple WHLs for the same package name (multi-OS bundles placed by the
-      plugin provider) are probed one at a time; the first one that actually
-      imports successfully is kept; the others are not added to ``sys.path``.
+    * Multiple WHLs for the same package name are probed one at a time; the
+      first one that actually imports successfully is kept.
 
     Returns the list of package names newly mounted by this call.
     """
@@ -189,7 +155,6 @@ def mount_plugin_whls(plugin_dir: Path) -> list[str]:
     if not whl_dir.is_dir():
         return []
 
-    # Group WHLs by package name so we can probe multi-OS bundles.
     groups: dict[str, list[Path]] = {}
     for whl_path in sorted(whl_dir.glob("*.whl")):
         pkg = _whl_pkg_name(whl_path)
@@ -198,24 +163,20 @@ def mount_plugin_whls(plugin_dir: Path) -> list[str]:
     newly_mounted: list[str] = []
 
     for pkg_name, candidates in groups.items():
-        # Skip if already available in main venv.
         found, _ = is_in_main_venv(pkg_name)
         if found:
             continue
 
-        # Skip if already claimed by a previously-loaded plugin.
         if pkg_name in _mounted_packages:
             continue
 
         if len(candidates) == 1:
-            # Single WHL - mount directly without import-probing.
             whl_str = str(candidates[0])
             if whl_str not in sys.path:
                 sys.path.append(whl_str)
             _mounted_packages.add(pkg_name)
             newly_mounted.append(pkg_name)
         else:
-            # Multiple OS variants - probe until one imports successfully.
             mounted = False
             for whl_path in candidates:
                 whl_str = str(whl_path)
@@ -239,10 +200,6 @@ def mount_plugin_whls(plugin_dir: Path) -> list[str]:
     return newly_mounted
 
 
-# ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
-
 def _compute_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -250,10 +207,6 @@ def _compute_sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
-# ---------------------------------------------------------------------------
-# Download
-# ---------------------------------------------------------------------------
 
 def download_whl(
     url: str,
@@ -269,8 +222,8 @@ def download_whl(
     3. ZIP structure check — the downloaded file must be a valid ZIP.
     4. SHA256 verification — if *expected_sha256* is provided the digest must match.
 
-    Returns the saved :class:`Path` on success, ``None`` on failure.
-    Any partial or invalid download is deleted before returning ``None``.
+    Returns the saved Path on success, None on failure.
+    Any partial or invalid download is deleted before returning None.
     """
     def _fail(msg: str, dest: Path | None = None) -> None:
         if progress_cb:
@@ -278,16 +231,14 @@ def download_whl(
         if dest is not None and dest.exists():
             dest.unlink(missing_ok=True)
 
-    #. HTTPS enforcement.
     if not url.lower().startswith("https://"):
         _fail(f"Rejected: URL must use HTTPS (got {url!r})")
         return None
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    #. Filename extraction and sanitization.
     raw_filename = url.rstrip("/").split("/")[-1].split("?")[0]
-    filename = Path(raw_filename).name  # strip any directory component
+    filename = Path(raw_filename).name
     if not filename.lower().endswith(".whl"):
         _fail(f"Rejected: URL does not point to a .whl file: {url}")
         return None
@@ -304,12 +255,10 @@ def download_whl(
         _fail(f"Download failed: {exc}", dest)
         return None
 
-    #. ZIP structure validation (WHL files are ZIP archives).
     if not zipfile.is_zipfile(dest):
         _fail(f"Rejected: {filename!r} is not a valid WHL (ZIP) file", dest)
         return None
 
-    #. SHA256 integrity check.
     if expected_sha256:
         actual = _compute_sha256(dest)
         if actual != expected_sha256.lower():
@@ -325,21 +274,11 @@ def download_whl(
     return dest
 
 
-# ---------------------------------------------------------------------------
-# Update checking
-# ---------------------------------------------------------------------------
-
 def check_whl_update(pkg: dict, whl_dir: Path) -> tuple[bool, str, str | None]:
     """Check whether *pkg*'s URL list has a better/different WHL than what is in *whl_dir*.
 
-    Selects the platform-compatible URL, then compares its filename to any
-    existing WHL for the same package.  A pre-placed WHL whose filename
-    already matches the URL filename is considered up-to-date.
-
     Returns ``(needs_update, selected_url, sha256)``.
     ``needs_update`` is ``True`` when the WHL is missing or its filename differs.
-    ``selected_url`` is the URL chosen for this platform (empty string if none).
-    ``sha256`` is the expected hex digest declared in ``addoninfo.json``, or ``None``.
     """
     urls = pkg.get("urls") or []
     if not urls:
@@ -351,7 +290,6 @@ def check_whl_update(pkg: dict, whl_dir: Path) -> tuple[bool, str, str | None]:
     if not url_filename.lower().endswith(".whl"):
         return False, "", None
 
-    # Resolve sha256: accepts a plain string (single-URL) or a dict keyed by filename.
     raw_sha256 = pkg.get("sha256") or {}
     if isinstance(raw_sha256, str):
         sha256: str | None = raw_sha256 or None
@@ -366,10 +304,6 @@ def check_whl_update(pkg: dict, whl_dir: Path) -> tuple[bool, str, str | None]:
     return False, url, sha256
 
 
-# ---------------------------------------------------------------------------
-# Main-venv check
-# ---------------------------------------------------------------------------
-
 def is_in_main_venv(package_name: str) -> tuple[bool, str]:
     """Check whether *package_name* is installed in the main Python environment.
 
@@ -381,10 +315,6 @@ def is_in_main_venv(package_name: str) -> tuple[bool, str]:
     except importlib.metadata.PackageNotFoundError:
         return False, ""
 
-
-# ---------------------------------------------------------------------------
-# Addon metadata helpers - used by plugin_loader and plugin_manager_dialog
-# ---------------------------------------------------------------------------
 
 def normalize_addonid(raw: str) -> str:
     """Return a normalized addonid: lowercase, only [a-z0-9_-], spaces -> '_'."""
@@ -399,27 +329,17 @@ def read_addonid(plugin_dir: Path) -> str | None:
     Returns ``""`` if the file exists but the ``addonid`` field is absent or empty.
     Returns the normalized id string otherwise.
     """
-    info_path = plugin_dir / "addoninfo.json"
-    if not info_path.exists():
+    data = read_addoninfo(plugin_dir)
+    if not data and not (plugin_dir / "addoninfo.json").exists():
         return None
-    try:
-        data = json.loads(info_path.read_text(encoding="utf-8"))
-        raw = data.get("addonid") or ""
-        return normalize_addonid(str(raw))
-    except Exception:
-        return ""
+    raw = data.get("addonid") or ""
+    return normalize_addonid(str(raw)) if raw else ""
 
 
 def read_plugin_deps(plugin_dir: Path) -> list[str]:
     """Return the normalized list of addonid dependencies declared in ``addoninfo.json``."""
-    info_path = plugin_dir / "addoninfo.json"
-    if not info_path.exists():
-        return []
-    try:
-        data = json.loads(info_path.read_text(encoding="utf-8"))
-        raw = data.get("plugins") or []
-        if isinstance(raw, list):
-            return [normalize_addonid(str(x)) for x in raw if str(x).strip()]
-    except Exception:
-        pass
+    data = read_addoninfo(plugin_dir)
+    raw = data.get("plugins") or []
+    if isinstance(raw, list):
+        return [normalize_addonid(str(x)) for x in raw if str(x).strip()]
     return []

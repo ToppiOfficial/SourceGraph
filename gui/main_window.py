@@ -23,14 +23,14 @@ from gui.logger import log, Level
 from gui.widgets.basic_shapes import ShapeDrawer, IconColors
 from gui.widgets.icon_provider import load_icon
 from gui.items.wire import ConnectionItem
-from core.plugin_packages import (
+from core.plugins import (
     resolve_whl_packages, get_whl_dir,
     find_whl_for_package, select_compatible_whl_url,
     download_whl, is_in_main_venv,
 )
 from gui.menu.plugin_manager_dialog import PluginManagerDialog
 from core.paths import app_root
-from core.plugin_loader import PluginLoader
+from core.plugins import PluginLoader
 from core.registry import get_default_registry
 
 

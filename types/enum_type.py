@@ -13,7 +13,7 @@ def _w(stem: str):
 
 _ew = _w("enum_widget")
 
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 register_port_type(PortTypeSpec(
     key="enum",
     color="#b4629d",

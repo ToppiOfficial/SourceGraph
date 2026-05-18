@@ -26,7 +26,7 @@ from core.events import (
     ConnectionAddedEvent, ConnectionRemovedEvent,
     GraphLoadedEvent,
 )
-from core.commands import (
+from core.history import (
     AddNodeCommand, RemoveNodeCommand, ConnectCommand,
     DisconnectCommand, MoveNodesCommand,
 )
@@ -1559,7 +1559,7 @@ class NodeEditorView(SafeGraphicsView):
             self.scene().clearSelection()
             current_pos = QPointF(scene_pos)
             for kind, value in items_to_process:
-                from core.drop_registry import dispatch
+                from core.registry import dispatch
                 dispatch(kind, self.scene(), current_pos, value, event.modifiers())
                 current_pos += QPointF(0, 120)
 

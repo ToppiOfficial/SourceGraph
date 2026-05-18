@@ -5,9 +5,9 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from core.node import BaseNode, In, OptIn, Out
-from core.drop_registry import register_drop_handler
-from core.enum_providers import EnumProvider as _EnumProvider, register_enum_provider
-from core.file_picker_registry import register_file_picker
+from core.registry import register_drop_handler
+from core.registry import EnumProvider as _EnumProvider, register_enum_provider
+from core.registry import register_file_picker
 from core.registry import NODE_CLASS_MAPPINGS
 from gui.widgets.node_widgets import make_file_picker, make_path_editor
 from gui.logger import log

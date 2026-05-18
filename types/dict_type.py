@@ -1,5 +1,5 @@
 import json as _json
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 
 def _coerce_value(value):
     if isinstance(value, dict):

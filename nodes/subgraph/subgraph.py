@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 
 from core.node import BaseNode, Port, parse_type, In, Out
 from core.execution import ExecutionContext, ExecutionMode, ExecutionTarget
-from core.file_picker_registry import get_file_picker
+from core.registry import get_file_picker
 from core.registry import NODE_CLASS_MAPPINGS
 from gui.widgets.node_widgets import make_file_picker
 from gui.logger import log

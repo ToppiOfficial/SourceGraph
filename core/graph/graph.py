@@ -1,49 +1,22 @@
 from __future__ import annotations
 import json
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from core.registry import get_default_registry, NODE_CLASS_MAPPINGS
-from core.graph_store_registry import get_all_store_specs
-from core.execution import StandardExecutionEngine
-
-if TYPE_CHECKING:
-    from .node import BaseNode
-    from .execution import ExecutionContext, ExecutionResult
+from core.graph.connection import Connection
+from core.graph.state import GraphState
+from core.graph.stores import get_all_store_specs
 from core.events import (
     EventBus, NodeAddedEvent, NodeRemovedEvent,
     ConnectionAddedEvent, ConnectionRemovedEvent, GraphLoadedEvent,
 )
 
+if TYPE_CHECKING:
+    from core.node.base import BaseNode
+    from core.execution.context import ExecutionContext, ExecutionResult
+
 _logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Connection:
-    src_node: str
-    src_port: str
-    dst_node: str
-    dst_port: str
-
-    def to_dict(self) -> dict:
-        return {"src_node": self.src_node, "src_port": self.src_port,
-                "dst_node": self.dst_node, "dst_port": self.dst_port}
-
-    @classmethod
-    def from_dict(cls, d: dict) -> Connection:
-        return cls(d["src_node"], d["src_port"], d["dst_node"], d["dst_port"])
-
-
-@dataclass
-class GraphState:
-    project_dir: str | None = None
-    output_dir: str | None = None
-    execution_sessions: list[dict] = field(default_factory=list)
-    view_state: dict[str, Any] = field(default_factory=dict)
-    time_unit: str = "ms"
-    ext_stores: dict[str, Any] = field(default_factory=dict)
 
 
 class Graph:
@@ -137,7 +110,7 @@ class Graph:
 
     def connect(self, src_node: str, src_port: str,
                 dst_node: str, dst_port: str) -> bool:
-        # Find connection being replaced on this dst port
+        """Connect two ports, replacing any existing connection on dst_port. Returns True."""
         replaced = next((c for c in self.connections
                          if c.dst_node == dst_node and c.dst_port == dst_port), None)
 
@@ -145,10 +118,7 @@ class Graph:
                             if not (c.dst_node == dst_node and c.dst_port == dst_port)]
         self.connections.append(Connection(src_node, src_port, dst_node, dst_port))
 
-        if src_node in self.nodes:
-            self.nodes[src_node].sync_dynamic_ports()
-        if dst_node in self.nodes:
-            self.nodes[dst_node].sync_dynamic_ports()
+        self._sync_nodes(src_node, dst_node)
 
         if replaced:
             self.bus.emit(ConnectionRemovedEvent(
@@ -166,14 +136,15 @@ class Graph:
             if not (c.src_node == src_node and c.src_port == src_port
                     and c.dst_node == dst_node and c.dst_port == dst_port)
         ]
-
-        if src_node in self.nodes:
-            self.nodes[src_node].sync_dynamic_ports()
-        if dst_node in self.nodes:
-            self.nodes[dst_node].sync_dynamic_ports()
-
+        self._sync_nodes(src_node, dst_node)
         self.bus.emit(ConnectionRemovedEvent(src_node, src_port, dst_node, dst_port))
         self._notify()
+
+    def _sync_nodes(self, *node_ids: str) -> None:
+        """Re-sync dynamic ports on all listed nodes that are present in the graph."""
+        for nid in node_ids:
+            if nid in self.nodes:
+                self.nodes[nid].sync_dynamic_ports()
 
     def get_input_connection(self, dst_node: str, dst_port: str) -> Connection | None:
         for c in self.connections:
@@ -186,10 +157,12 @@ class Graph:
                 if c.src_node == node_id or c.dst_node == node_id]
 
     def execute_with_context(self, context: ExecutionContext) -> dict[str, ExecutionResult]:
+        from core.execution.engine import StandardExecutionEngine
         engine = StandardExecutionEngine()
         return engine.execute(self, context)
 
     def to_dict(self) -> dict:
+        from core.registry.nodes import get_default_registry
         registry = get_default_registry()
         plugin_deps: set[str] = set()
         for node in self.nodes.values():
@@ -210,6 +183,7 @@ class Graph:
         return d
 
     def load_dict(self, data: dict, registry: dict | None = None) -> None:
+        from core.registry.nodes import get_default_registry, NODE_CLASS_MAPPINGS
         _reg = get_default_registry()
         loaded_plugins = {s[len("plugin:"):] for s in _reg._sources.values() if s.startswith("plugin:")}
         self._missing_plugins: list[str] = [p for p in data.get("required_plugins", []) if p not in loaded_plugins]
@@ -246,14 +220,13 @@ class Graph:
         for cd in data.get("connections", []):
             self.connections.append(Connection.from_dict(cd))
 
-        # Synchronize dynamic ports after connections so numbered slots (item1, item2…)
-        # are created based on actual wiring rather than defaulting to 1 empty slot.
+        # Synchronize dynamic ports after connections so numbered slots are
+        # created based on actual wiring rather than defaulting to 1 empty slot.
         for node in self.nodes.values():
             node.sync_dynamic_ports()
 
         _logger.info(f"Graph loaded: {len(self.nodes)} nodes, {len(self.connections)} connections")
 
-        # Signal bulk load complete - scene subscribes to this and rebuilds
         self.bus.emit(GraphLoadedEvent())
 
     def save(self, path: str | Path) -> None:

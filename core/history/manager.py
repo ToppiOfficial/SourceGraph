@@ -9,19 +9,19 @@ from typing import TYPE_CHECKING, Any, Callable
 from PySide6.QtCore import QTimer
 from PySide6.QtGui  import QUndoCommand, QUndoStack
 
-from core.graph_store_registry import get_all_store_specs
-from core.commands import CompositeCommand
-from .graph import Connection
+from core.graph.stores import get_all_store_specs
+from core.graph.connection import Connection
+from core.history.commands import CompositeCommand
 
 if TYPE_CHECKING:
-    from .graph import Graph
-    from .node import BaseNode
-    from .commands import Command
+    from core.graph.graph import Graph
+    from core.node.base import BaseNode
+    from core.history.commands import Command
 
 
 @dataclass
 class StateSnapshot:
-    """Immutable capture of graph state used as the before/after in a command."""
+    """Immutable capture of graph state used as the before/after in a snapshot command."""
     nodes:       dict[str, dict] = field(default_factory=dict)
     connections: list[dict]      = field(default_factory=list)
     execution:   list[dict]      = field(default_factory=list)
@@ -126,9 +126,7 @@ class HistoryCommand(QUndoCommand):
             if mgr:
                 scene = getattr(mgr.graph, "_scene_ref", lambda: None)()
                 if scene and hasattr(scene, "set_external_state"):
-                    scene.set_external_state({
-                        "execution": snapshot.execution
-                    })
+                    scene.set_external_state({"execution": snapshot.execution})
 
                 if scene and hasattr(scene, "_rebuild_from_graph"):
                     scene._rebuild_from_graph(selected)
@@ -189,7 +187,6 @@ class CommandStack:
     def __init__(self, qt_stack: QUndoStack, mgr: "HistoryManager") -> None:
         self._qt_stack = qt_stack
         self._mgr = mgr
-        # Non-None while a transaction is collecting commands.
         self._current_batch: list | None = None
 
     def push(self, cmd: "Command") -> None:
@@ -274,7 +271,7 @@ class HistoryManager:
         return {}
 
     def notify_immediate(self, description: str = "Change") -> None:
-        """Flush any pending diff immediately."""
+        """Flush any pending diff immediately as a named undo entry."""
         if self._skip_counter > 0 or self._transaction_depth > 0 or self._restoring:
             return
         self._debounce.stop()
@@ -315,7 +312,7 @@ class HistoryManager:
 
     @contextmanager
     def skip_undo(self):
-        """Suppress all tracking (use for load / new / batch-rebuild)."""
+        """Suppress all history tracking (use for load / new / batch-rebuild)."""
         self._debounce.stop()
         self._skip_counter += 1
         try:
@@ -363,7 +360,7 @@ class HistoryManager:
             self._debounce.start(self.DEBOUNCE_MS)
 
     def _auto_commit(self) -> None:
-        """Diff current graph against _committed; push a command if changed."""
+        """Diff current graph against _committed; push a snapshot command if changed."""
         if self._restoring or self._skip_counter > 0:
             return
         current = StateSnapshot.capture(self.graph, self._get_ext())

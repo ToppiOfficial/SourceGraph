@@ -18,8 +18,8 @@ from gui.dialogs import RenameDialog
 from core.execution import (
     ExecutionContext, StandardExecutionEngine, ExecutionResult
 )
-from core.enum_providers import register_enum_provider
-from core.graph_store_registry import get_volatile_store_specs
+from core.registry import register_enum_provider
+from core.graph import get_volatile_store_specs
 from gui.items.node import NodeItem
 from gui.logger import log
 from gui.theme import *

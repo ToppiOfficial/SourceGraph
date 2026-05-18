@@ -19,10 +19,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QCursor, QPainter
 
 from core.node import port_uses_graph_variables
-from core.port_type_registry import (
+from core.registry import (
     get_color as _get_port_color,
     is_inspector_editable as _type_inspector_editable,
-    get_port_type_spec as _get_type_spec, make_port_notify_proxy
+    get_port_type_spec as _get_type_spec,
+    make_port_notify_proxy,
+    get_file_picker,
 )
 from gui.theme import *
 from gui.items.node import NodeItem
@@ -30,7 +32,6 @@ from gui.panels.base_panel import BasePanel
 from gui.logger import log
 from gui.commands import PropertyCommand
 from gui.menu.file_search_dialog import GenericSelectionDialog
-from core.file_picker_registry import get_file_picker
 
 if TYPE_CHECKING:
     from gui.main_window import MainWindow

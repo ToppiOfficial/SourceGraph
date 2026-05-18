@@ -8,13 +8,13 @@ from PySide6.QtGui     import (QColor, QPen, QBrush, QFont, QPainter, QPainterPa
 from PySide6.QtCore    import Qt, QRectF, QPointF, QTimer
 
 from core.node import BaseNode, Port, port_uses_graph_variables, _coerce
-from core.port_type_registry import (
+from core.registry import (
     get_color as _get_port_color,
     is_editable as _type_editable,
     get_port_type_spec as _get_type_spec,
+    get_default_registry as _get_registry,
+    get_file_picker,
 )
-from core.registry import get_default_registry as _get_registry
-from core.file_picker_registry import get_file_picker
 from gui.theme import *
 from gui.widgets.basic_shapes import ShapeDrawer
 from gui.logger import log
@@ -541,7 +541,7 @@ class NodeItem(QGraphicsItem):
     
     def _create_basic_widget(self, port, parent=None):
         """Create basic widgets based on port type using theme styles."""
-        from core.port_type_registry import make_port_notify_proxy
+        from core.registry import make_port_notify_proxy
         node_id = self.node.id
         def _notify(nid=node_id):
             sc = self.scene()

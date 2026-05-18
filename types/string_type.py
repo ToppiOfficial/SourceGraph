@@ -13,7 +13,7 @@ def _w(stem: str):
 
 _sw = _w("string_widget")
 
-from core.port_type_registry import register_port_type, PortTypeSpec
+from core.registry import register_port_type, PortTypeSpec
 register_port_type(PortTypeSpec(
     key="string",
     color="#4ec9b0",

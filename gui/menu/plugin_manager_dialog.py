@@ -411,7 +411,7 @@ class PluginManagerDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_update_packages(self) -> None:
-        from core.plugin_packages import (
+        from core.plugins import (
             resolve_whl_packages, get_whl_dir,
             check_whl_update, download_whl,
         )

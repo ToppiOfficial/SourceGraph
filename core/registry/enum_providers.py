@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.graph import Graph
-    from core.node import Port
+    from core.graph.graph import Graph
+    from core.node.port import Port
 
 
 class EnumProvider:
@@ -29,10 +28,6 @@ def register_enum_provider(key: str, provider: EnumProvider) -> None:
 def get_enum_provider(key: str) -> EnumProvider | None:
     return _providers.get(key)
 
-
-# ---------------------------------------------------------------------------
-# Built-in providers
-# ---------------------------------------------------------------------------
 
 class VariablesEnumProvider(EnumProvider):
     def resolve(self, graph: "Graph", port: "Port") -> None:

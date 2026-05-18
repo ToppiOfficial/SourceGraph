@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
 import inspect
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from core.utils.modules import load_plugin_module
 
 if TYPE_CHECKING:
-    from core.registry import NodeRegistry
-    from core.node import BaseNode
+    from core.registry.nodes import NodeRegistry
+    from core.node.base import BaseNode
 
 
 class PluginLoader:
@@ -19,7 +19,7 @@ class PluginLoader:
         plugins/<plugin_name>/nodes/<module>.py    - BaseNode subclasses
         plugins/<plugin_name>/panels/<module>.py   - BasePanel subclasses (optional)
 
-    Errors in individual plugins are logged and skipped - they never crash the app.
+    Errors in individual plugins are logged and skipped — they never crash the app.
     """
 
     def __init__(self, registry: "NodeRegistry") -> None:
@@ -30,8 +30,8 @@ class PluginLoader:
         """Scan *plugins_dir* for plugin subdirs and load node/panel classes from each.
 
         Requires each plugin to have an ``addoninfo.json`` with an ``addonid`` field.
-        Plugins with duplicate addonids (first alphabetically wins), unresolvable
-        dependencies, or circular dependencies are skipped with a console warning.
+        Plugins with duplicate addonids, unresolvable dependencies, or circular
+        dependencies are skipped with a console warning.
         Remaining plugins load in dependency order.
         """
         if not plugins_dir.is_dir():
@@ -44,15 +44,15 @@ class PluginLoader:
             sys.path.insert(0, plugins_str)
 
         from collections import deque
-        from core.plugin_packages import (
+        from core.plugins.packages import (
             mount_plugin_whls,
-            read_addonid, read_plugin_deps,
+            read_addonid,
+            read_plugin_deps,
         )
 
         # Phase 1: collect valid candidates, deduplicate by addonid.
-        # candidates: folder_name -> {addonid, deps, dir}
         candidates: dict[str, dict] = {}
-        seen_ids: dict[str, str] = {}  # addonid -> first folder that claimed it
+        seen_ids: dict[str, str] = {}
 
         for entry in sorted(plugins_dir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("_"):
@@ -95,10 +95,7 @@ class PluginLoader:
                 for dep_id in info["deps"]:
                     dep_folder = id_to_folder.get(dep_id)
                     if dep_folder is None:
-                        print(
-                            f"[PluginLoader] Skipping '{folder}': "
-                            f"dependency '{dep_id}' not found"
-                        )
+                        print(f"[PluginLoader] Skipping '{folder}': dependency '{dep_id}' not found")
                         skipped.add(folder)
                         changed = True
                         break
@@ -111,9 +108,7 @@ class PluginLoader:
                         changed = True
                         break
 
-        active: dict[str, dict] = {
-            f: info for f, info in candidates.items() if f not in skipped
-        }
+        active: dict[str, dict] = {f: info for f, info in candidates.items() if f not in skipped}
 
         # Phase 3: topological sort (Kahn's algorithm).
         in_degree: dict[str, int] = {f: 0 for f in active}
@@ -180,67 +175,45 @@ class PluginLoader:
         return list(self._loaded)
 
     def _load_plugin_nodes(self, nodes_dir: Path, plugin_name: str) -> None:
-        from core.node import BaseNode
+        from core.node.base import BaseNode
 
         for py_file in sorted(nodes_dir.glob("*.py")):
             if py_file.name.startswith("_"):
                 continue
             module_name = f"plugin_{plugin_name}_{py_file.stem}"
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, py_file)
-                if spec is None or spec.loader is None:
-                    continue
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
+            module = load_plugin_module(py_file, module_name)
+            if module is None:
+                continue
 
-                for _name, obj in inspect.getmembers(module, inspect.isclass):
-                    if (issubclass(obj, BaseNode)
-                            and obj is not BaseNode
-                            and obj.__module__ == module_name
-                            and obj.__name__ not in self._registry.node_map()):
-                        self._registry.register(obj, source=f"plugin:{plugin_name}")
-
-            except Exception as exc:
-                print(f"[PluginLoader] Error loading '{py_file}': {exc}")
+            for _name, obj in inspect.getmembers(module, inspect.isclass):
+                if (issubclass(obj, BaseNode)
+                        and obj is not BaseNode
+                        and obj.__module__ == module_name
+                        and obj.__name__ not in self._registry.node_map()):
+                    self._registry.register(obj, source=f"plugin:{plugin_name}")
 
     def _load_plugin_types(self, types_dir: Path, plugin_name: str) -> None:
         for py_file in sorted(types_dir.glob("*.py")):
             if py_file.name.startswith("_"):
                 continue
             module_name = f"plugin_{plugin_name}_{py_file.stem}_types"
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, py_file)
-                if spec is None or spec.loader is None:
-                    continue
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
-                # No class scanning - registration is a side effect of exec.
-            except Exception as exc:
-                print(f"[PluginLoader] Error loading types '{py_file}': {exc}")
+            # Registration is a side effect of exec — no class scanning needed.
+            load_plugin_module(py_file, module_name)
 
     def _load_plugin_panels(self, panels_dir: Path, plugin_name: str) -> None:
         from gui.panels.base_panel import BasePanel
-        from core.panel_registry import register_panel
+        from core.registry.panels import register_panel
 
         for py_file in sorted(panels_dir.glob("*.py")):
             if py_file.name.startswith("_"):
                 continue
             module_name = f"plugin_{plugin_name}_{py_file.stem}_panel"
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, py_file)
-                if spec is None or spec.loader is None:
-                    continue
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
+            module = load_plugin_module(py_file, module_name)
+            if module is None:
+                continue
 
-                for _name, obj in inspect.getmembers(module, inspect.isclass):
-                    if (issubclass(obj, BasePanel)
-                            and obj is not BasePanel
-                            and obj.__module__ == module_name):
-                        register_panel(obj)
-
-            except Exception as exc:
-                print(f"[PluginLoader] Error loading panel '{py_file}': {exc}")
+            for _name, obj in inspect.getmembers(module, inspect.isclass):
+                if (issubclass(obj, BasePanel)
+                        and obj is not BasePanel
+                        and obj.__module__ == module_name):
+                    register_panel(obj)

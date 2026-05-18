@@ -1,24 +1,19 @@
 """
 Delta-based command objects for undo/redo.
 
-All commands are plain Python - no Qt imports.
+All commands are plain Python — no Qt imports.
 Scene access is via weakref to avoid circular imports.
-Commands are executed immediately when pushed; the wrapper in history.py
-handles the Qt undo stack integration.
+Commands execute immediately when pushed; history/manager.py handles Qt undo-stack integration.
 """
 from __future__ import annotations
 import weakref
 from typing import Any, TYPE_CHECKING
 
-from core.node import _coerce
+from core.utils.refs import safe_deref
 
 if TYPE_CHECKING:
-    from core.graph import Graph
+    from core.graph.graph import Graph
 
-
-# ---------------------------------------------------------------------------
-# Protocol
-# ---------------------------------------------------------------------------
 
 class Command:
     """Base class for all undoable commands."""
@@ -27,22 +22,6 @@ class Command:
     def execute(self) -> None: ...
     def undo(self) -> None: ...
 
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-def _get_scene(scene_ref):
-    """Safely dereference a weakref to a scene."""
-    if scene_ref is None:
-        return None
-    scene = scene_ref()
-    return scene if scene is not None else None
-
-
-# ---------------------------------------------------------------------------
-# Graph-mutation commands
-# ---------------------------------------------------------------------------
 
 class AddNodeCommand(Command):
     """Add a node to the graph. Undo removes it."""
@@ -56,11 +35,9 @@ class AddNodeCommand(Command):
 
     def execute(self) -> None:
         self.graph.add_node(self.node)
-        # NodeAddedEvent fires -> scene._on_node_added creates the item
 
     def undo(self) -> None:
         self.graph.remove_node(self.node.id)
-        # NodeRemovedEvent fires -> scene._on_node_removed removes the item
 
 
 class RemoveNodeCommand(Command):
@@ -79,7 +56,7 @@ class RemoveNodeCommand(Command):
         self.description = f"Delete {title}"
 
     def execute(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
         affected = set()
         for c in self.graph.connections:
@@ -89,7 +66,6 @@ class RemoveNodeCommand(Command):
                 affected.add(c.src_node)
 
         self.graph.remove_node(self.node_id)
-        # NodeRemovedEvent fires -> scene._on_node_removed removes item + connections
 
         if scene:
             for nid in affected:
@@ -99,7 +75,7 @@ class RemoveNodeCommand(Command):
             scene.graph_changed.emit()
 
     def undo(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
         if self._registry is None:
             return
@@ -108,14 +84,12 @@ class RemoveNodeCommand(Command):
             return
         node = cls.from_dict(self.snapshot)
         self.graph.add_node(node)
-        # NodeAddedEvent fires -> scene creates item + calls _flush_updates
 
         affected = set()
         for cd in self.conn_snapshots:
             try:
                 self.graph.connect(cd["src_node"], cd["src_port"],
                                    cd["dst_node"], cd["dst_port"])
-                # ConnectionAddedEvent fires -> scene materialises
                 for nid in (cd["src_node"], cd["dst_node"]):
                     if nid != self.node_id:
                         affected.add(nid)
@@ -141,16 +115,13 @@ class ConnectCommand(Command):
         self.src_port = src_port
         self.dst_node = dst_node
         self.dst_port = dst_port
-        self.replaced_conn = replaced_conn  # Connection or None
+        self.replaced_conn = replaced_conn
         self._scene_ref = scene_ref
         self.description = "Connect Ports"
 
     def execute(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
-        # Manually remove replaced connection's visual item BEFORE graph.connect()
-        # (graph.connect() handles data removal, but the event fires after sync_dynamic_ports;
-        # doing it manually first avoids a timing issue with dynamic port renumbering)
         if scene and self.replaced_conn:
             rc = self.replaced_conn
             for pair in list(scene._conn_items):
@@ -162,8 +133,6 @@ class ConnectCommand(Command):
                     scene._conn_items.remove(pair)
                     break
 
-        # Suppress bus during graph.connect() - we manage visuals manually here
-        # to avoid double-materialisation since _try_connect's old path no longer runs
         if scene:
             scene._suppress_bus = True
         try:
@@ -184,7 +153,7 @@ class ConnectCommand(Command):
             scene.graph_changed.emit()
 
     def undo(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
         if scene:
             scene._suppress_bus = True
@@ -195,7 +164,6 @@ class ConnectCommand(Command):
             if scene:
                 scene._suppress_bus = False
 
-        # Remove visual item for this connection
         if scene:
             key = (self.src_node, self.src_port, self.dst_node, self.dst_port)
             for pair in list(scene._conn_items):
@@ -208,7 +176,6 @@ class ConnectCommand(Command):
                     scene._conn_items.remove(pair)
                     break
 
-        # Restore the replaced connection if there was one
         if self.replaced_conn:
             rc = self.replaced_conn
             if scene:
@@ -249,7 +216,7 @@ class DisconnectCommand(Command):
         self.description = "Disconnect"
 
     def execute(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
         if scene:
             scene._suppress_bus = True
@@ -278,7 +245,7 @@ class DisconnectCommand(Command):
             scene.graph_changed.emit()
 
     def undo(self) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
 
         if scene:
             scene._suppress_bus = True
@@ -305,13 +272,12 @@ class MoveNodesCommand(Command):
 
     def __init__(self, graph: Graph, moves: list[tuple], scene_ref=None):
         self.graph = graph
-        # moves: list of (node_id, old_x, old_y, new_x, new_y)
         self.moves = moves
         self._scene_ref = scene_ref
         self.description = "Move Nodes"
 
     def _apply(self, use_new: bool) -> None:
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
         for node_id, old_x, old_y, new_x, new_y in self.moves:
             x, y = (new_x, new_y) if use_new else (old_x, old_y)
             node = self.graph.nodes.get(node_id)
@@ -352,10 +318,11 @@ class ChangePropertyCommand(Command):
         port = node.inputs.get(self.port_name)
         if port is None:
             return
+        from core.node.base import _coerce
         val_str = str(val) if val is not None else ""
         _coerce(port, val_str)
 
-        scene = _get_scene(self._scene_ref)
+        scene = safe_deref(self._scene_ref)
         if scene:
             scene._after_node_mutation(self.node_id)
             scene._emit_graph_changed()
