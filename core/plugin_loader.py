@@ -45,7 +45,7 @@ class PluginLoader:
 
         from collections import deque
         from core.plugin_packages import (
-            get_packages_dir, add_packages_to_path,
+            mount_plugin_whls,
             read_addonid, read_plugin_deps,
         )
 
@@ -146,7 +146,7 @@ class PluginLoader:
             entry = active[folder]["dir"]
             loaded_something = False
 
-            add_packages_to_path(get_packages_dir(entry))
+            mount_plugin_whls(entry)
 
             # Types must load before nodes so parse_type() resolves them
             # when node module-level code runs.

@@ -236,7 +236,7 @@ class NodeItem(QGraphicsItem):
         self._output_port_names: list[str]                 = []
         self._proxies:    dict[str, QGraphicsProxyWidget]  = {}
         self._port_widgets: dict[str, QWidget]             = {}
-        # Maps input port name → source Port object when connected, else None.
+        # Maps input port name -> source Port object when connected, else None.
         # Populated by _sync_connection_states; avoids graph queries inside paint().
         self._conn_cache: dict[str, Any | None]            = {}
 

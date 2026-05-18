@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
+    QApplication, QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
     QFrame, QLabel, QSplitter, QPushButton, QScrollArea, QWidget,
-    QLineEdit, QCheckBox, QAbstractItemView,
+    QLineEdit, QCheckBox, QAbstractItemView, QMessageBox, QProgressDialog,
 )
 from PySide6.QtCore import Qt, QSize
 
@@ -40,6 +42,7 @@ class PluginManagerDialog(QDialog):
         self.resize(860, 480)
         self.setModal(True)
 
+        self._plugins_dir = plugins_dir
         self._all_plugins: list[dict] = self._scan_plugins(plugins_dir, disabled_plugins)
         self._visible_plugins: list[dict] = []
 
@@ -102,9 +105,12 @@ class PluginManagerDialog(QDialog):
 
         raw_pkgs = data.get("packages")
         if isinstance(raw_pkgs, list):
-            pkg_list = [str(p) for p in raw_pkgs if p]
-        elif isinstance(raw_pkgs, str) and raw_pkgs:
-            pkg_list = [raw_pkgs]  # requirements.txt path reference
+            pkg_list = []
+            for p in raw_pkgs:
+                if isinstance(p, dict) and p.get("name"):
+                    pkg_list.append(str(p["name"]))
+                elif isinstance(p, str) and p:
+                    pkg_list.append(p)
         else:
             pkg_list = []
 
@@ -190,6 +196,9 @@ class PluginManagerDialog(QDialog):
 
         # Button row
         btn_row = QHBoxLayout()
+        update_btn = QPushButton("Update Packages")
+        update_btn.clicked.connect(self._on_update_packages)
+        btn_row.addWidget(update_btn)
         btn_row.addStretch()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
@@ -396,6 +405,80 @@ class PluginManagerDialog(QDialog):
         tag_row.addStretch()
         layout.insertWidget(idx, tag_row_widget); idx += 1
         return idx
+
+    # ------------------------------------------------------------------
+    # Package update
+    # ------------------------------------------------------------------
+
+    def _on_update_packages(self) -> None:
+        from core.plugin_packages import (
+            resolve_whl_packages, get_whl_dir,
+            check_whl_update, download_whl,
+        )
+
+        to_download: list[tuple[Path, dict, str, str | None]] = []  # (whl_dir, pkg, url, sha256)
+
+        for plugin in self._all_plugins:
+            if not plugin.get("enabled"):
+                continue
+            plugin_dir = self._plugins_dir / plugin["folder"]
+            if not plugin_dir.is_dir():
+                continue
+            whl_dir = get_whl_dir(plugin_dir)
+            for pkg in resolve_whl_packages(plugin_dir):
+                needs, url, sha256 = check_whl_update(pkg, whl_dir)
+                if needs and url:
+                    to_download.append((whl_dir, pkg, url, sha256))
+
+        if not to_download:
+            QMessageBox.information(self, "Update Packages", "All packages are up to date.")
+            return
+
+        progress = QProgressDialog(
+            "Checking for package updates...", "Cancel", 0, len(to_download), self
+        )
+        progress.setWindowTitle("Update Packages")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        downloaded_any = False
+        messages: list[str] = []
+
+        for i, (whl_dir, pkg, url, sha256) in enumerate(to_download):
+            if progress.wasCanceled():
+                break
+            progress.setLabelText(f"Downloading {pkg['name']} ...")
+            QApplication.processEvents()
+
+            def _cb(msg: str) -> None:
+                messages.append(msg)
+                QApplication.processEvents()
+
+            result = download_whl(url, whl_dir, progress_cb=_cb, expected_sha256=sha256)
+            if result:
+                downloaded_any = True
+            progress.setValue(i + 1)
+            QApplication.processEvents()
+
+        progress.close()
+
+        if not downloaded_any:
+            QMessageBox.warning(
+                self, "Update Packages",
+                "No packages were downloaded.\n" + "\n".join(messages[-5:]) if messages else "Download failed."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Restart Required",
+            "Packages were updated. Restart the application to apply changes.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
     # ------------------------------------------------------------------
     # Result

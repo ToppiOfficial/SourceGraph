@@ -24,11 +24,12 @@ from gui.widgets.basic_shapes import ShapeDrawer, IconColors
 from gui.widgets.icon_provider import load_icon
 from gui.items.wire import ConnectionItem
 from core.plugin_packages import (
-    resolve_packages, get_packages_dir,
-    _package_name, is_package_installed, is_in_main_venv,
-    detect_plugin_conflicts, install_packages,
+    resolve_whl_packages, get_whl_dir,
+    find_whl_for_package, select_compatible_whl_url,
+    download_whl, is_in_main_venv,
 )
 from gui.menu.plugin_manager_dialog import PluginManagerDialog
+from core.paths import app_root
 from core.plugin_loader import PluginLoader
 from core.registry import get_default_registry
 
@@ -123,7 +124,7 @@ class MainWindow(QMainWindow):
         self.scene.graph_changed.connect(self._on_changed)
 
         self._progress("Loading plugins…", 65)
-        self._install_plugin_packages()
+        self._setup_plugin_whls()
         self._progress("Initializing plugins…", 75)
         self._load_plugins()
         self.panel_manager.load_and_setup_plugin_panels()
@@ -875,22 +876,23 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _install_plugin_packages(self) -> None:
-        """Install missing pip packages declared by enabled plugins.
+    def _setup_plugin_whls(self) -> None:
+        """Download missing WHL packages declared by enabled plugins.
 
-        Packages are installed into each plugin's own .addon_packages/ directory
-        so the main venv is never modified. Plugin package dirs are appended to
-        sys.path so the main venv always takes priority.
+        Each plugin stores its ``.whl`` files under ``<plugin>/whl/``.  If a
+        WHL is already present (user-placed or previously downloaded) it is
+        used as-is without re-downloading.  Mounting happens later inside
+        ``PluginLoader.discover()`` via ``mount_plugin_whls()``.
 
-        The console panel is shown and the window displayed early only when an
-        actual installation is required.
+        When any new WHL is downloaded the user is asked to restart so the
+        freshly-written files are picked up on the next launch.
         """
-        plugins_dir = Path(__file__).parent.parent / "plugins"
+        plugins_dir = app_root() / "plugins"
         if not plugins_dir.is_dir():
             return
 
-        # Collect all requirements per plugin for conflict detection.
-        all_reqs: dict[str, list[str]] = {}
+        needs_download: list[tuple[Path, dict, str]] = []  # (whl_dir, pkg, url)
+
         for entry in sorted(plugins_dir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("_"):
                 continue
@@ -898,74 +900,72 @@ class MainWindow(QMainWindow):
                 continue
             if not (entry / "addoninfo.json").exists():
                 continue
-            pkgs = resolve_packages(entry)
-            if pkgs:
-                all_reqs[entry.name] = pkgs
 
-        if not all_reqs:
-            return
-
-        # Warn about version conflicts between plugins.
-        for warning in detect_plugin_conflicts(all_reqs):
-            log.warning(f"[Packages] {warning}")
-
-        # Determine which packages actually need installing.
-        needs_install: list[tuple[Path, list[str]]] = []
-        for plugin_name, specs in all_reqs.items():
-            plugin_dir = plugins_dir / plugin_name
-            packages_dir = get_packages_dir(plugin_dir)
-            to_install: list[str] = []
-            for spec in specs:
-                name = _package_name(spec)
-                found, ver = is_in_main_venv(name)
+            whl_dir = get_whl_dir(entry)
+            for pkg in resolve_whl_packages(entry):
+                pkg_name = pkg["name"]
+                found, ver = is_in_main_venv(pkg_name)
                 if found:
-                    # Main venv has this package - skip install, it will be used.
                     log.info(
-                        f"[Packages] '{plugin_name}' requires {spec}; "
-                        f"using main-venv version {ver} (skipping install)."
+                        f"[Packages] '{entry.name}' requires '{pkg_name}'; "
+                        f"using main-venv version {ver}."
                     )
                     continue
-                if is_package_installed(name, packages_dir):
-                    continue  # already installed in plugin dir
-                to_install.append(spec)
-            if to_install:
-                needs_install.append((plugin_dir, to_install))
+                # Pre-placed or previously-downloaded WHL takes priority.
+                if find_whl_for_package(pkg_name, whl_dir):
+                    continue
+                url = select_compatible_whl_url(pkg.get("urls") or [])
+                if url:
+                    needs_download.append((whl_dir, pkg, url))
+                else:
+                    log.warning(
+                        f"[Packages] '{entry.name}' requires '{pkg_name}' but no compatible "
+                        f"WHL found in whl/ and no compatible URL declared."
+                    )
 
-        if not needs_install:
+        if not needs_download:
             return
 
-        # Show the console so the user can watch installation progress.
         console_panel = self.panel_manager.get_panel("ConsoleDock")
         if console_panel:
             console_panel.show()
         self.show()
         QApplication.processEvents()
 
-        for plugin_dir, to_install in needs_install:
-            log.info(f"[Packages] Installing for '{plugin_dir.name}': {', '.join(to_install)}")
-            QApplication.processEvents()
-
-            packages_dir = get_packages_dir(plugin_dir)
-
-            def _on_line(line: str, _app=QApplication) -> None:
-                if line:
-                    log.info(f"  pip | {line}")
+        downloaded_any = False
+        for whl_dir, pkg, url in needs_download:
+            def _cb(msg: str, _app: type = QApplication) -> None:
+                if msg:
+                    log.info(f"  whl | {msg}")
                     _app.processEvents()
 
-            ok = install_packages(to_install, packages_dir, output_cb=_on_line)
-            if ok:
-                log.info(f"[Packages] '{plugin_dir.name}' packages installed successfully.")
+            result = download_whl(url, whl_dir, progress_cb=_cb)
+            if result:
+                downloaded_any = True
+                log.info(f"[Packages] Downloaded '{result.name}'.")
             else:
                 log.error(
-                    f"[Packages] Failed to install packages for '{plugin_dir.name}'. "
+                    f"[Packages] Failed to download '{pkg['name']}' from {url}. "
                     f"Plugin may not work correctly."
                 )
             QApplication.processEvents()
 
+        if downloaded_any:
+            reply = QMessageBox.question(
+                self,
+                "Restart Required",
+                "New plugin packages were downloaded.\nRestart the application to load them.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                import os
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+
     def _load_builtin_types(self) -> None:
         """Load built-in port type registrations from the types/ directory."""
         import importlib.util
-        types_dir = Path(__file__).parent.parent / "types"
+        types_dir = app_root() / "types"
         if not types_dir.is_dir():
             return
         for py_file in sorted(types_dir.glob("*.py")):
@@ -984,13 +984,13 @@ class MainWindow(QMainWindow):
     def _load_plugins(self) -> None:
         """Discover and load plugins from the plugins/ directory."""
         self._load_builtin_types()
-        plugins_dir = Path(__file__).parent.parent / "plugins"
+        plugins_dir = app_root() / "plugins"
         loaded = PluginLoader(get_default_registry()).discover(plugins_dir, disabled=self._disabled_plugins)
         if loaded:
             log.info(f"Loaded plugins: {', '.join(loaded)}")
 
     def _open_plugin_manager(self) -> None:
-        plugins_dir = Path(__file__).parent.parent / "plugins"
+        plugins_dir = app_root() / "plugins"
         dlg = PluginManagerDialog(plugins_dir, self._disabled_plugins, parent=self)
         if dlg.exec() == PluginManagerDialog.Accepted:
             new_disabled = dlg.get_disabled()

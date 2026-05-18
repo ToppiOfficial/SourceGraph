@@ -1,10 +1,14 @@
-import os
 import importlib
 import inspect
+import pkgutil
 from typing import Dict, Type
+
 from PySide6.QtCore import Qt
 from gui.panels.base_panel import BasePanel
 from gui.logger import log
+
+_SKIP = frozenset(('base', 'manager', 'base_panel', 'graph_hierarchy', 'console', '__init__'))
+
 
 class PanelManager:
     def __init__(self, main_window) -> None:
@@ -12,63 +16,60 @@ class PanelManager:
         self.panels: Dict[str, BasePanel] = {}
 
     def discover_and_load(self):
-        """Scans the gui/panels directory and loads all BasePanel subclasses.
-        Prioritizes ConsolePanel to capture errors during other panel initialization."""
-        manager_path = os.path.abspath(__file__)
-        panels_dir = os.path.dirname(manager_path)
+        """Load all BasePanel subclasses from gui.panels.
 
-        # load and setup ConsolePanel early to capture startup errors 
-        console_panel_loaded = False
-        for filename in sorted(os.listdir(panels_dir)):
-            if filename == "console.py":
-                module_name = f"gui.panels.console"
-                try:
-                    module = importlib.import_module(module_name)
-                    for name, obj in inspect.getmembers(module):
-                        if (inspect.isclass(obj) and
+        Uses pkgutil.iter_modules instead of os.listdir so this works both
+        when running from source and when frozen by PyInstaller (modules live
+        in the PYZ archive, not as .py files on disk).
+
+        ConsolePanel is loaded first so it can capture errors from other panels.
+        """
+        # Load ConsolePanel early so it captures startup errors
+        try:
+            module = importlib.import_module("gui.panels.console")
+            for _, obj in inspect.getmembers(module):
+                if (inspect.isclass(obj) and
+                        issubclass(obj, BasePanel) and
+                        obj is not BasePanel):
+                    self._instantiate_panel(obj)
+                    panel = self.panels.get(obj.ID)
+                    if panel:
+                        panel.setup()
+        except Exception as e:
+            print(f"Failed to load ConsolePanel early: {e}")
+
+        import gui.panels as _pkg
+        for _finder, modname, _ispkg in sorted(
+            pkgutil.iter_modules(_pkg.__path__, _pkg.__name__ + '.')
+        ):
+            if modname.split('.')[-1] in _SKIP:
+                continue
+            try:
+                module = importlib.import_module(modname)
+                for _, obj in inspect.getmembers(module):
+                    if (inspect.isclass(obj) and
                             issubclass(obj, BasePanel) and
                             obj is not BasePanel):
-                            self._instantiate_panel(obj)
-                            # Setup console panel immediately so it can capture errors
-                            panel = self.panels.get(obj.ID)
-                            if panel:
-                                panel.setup()
-                                console_panel_loaded = True
-                except Exception as e:
-                    print(f"Failed to load ConsolePanel early: {e}")
-
-        # load remaining panels
-        for filename in sorted(os.listdir(panels_dir)):
-            if filename.endswith(".py") and filename not in ("base.py", "manager.py", "__init__.py", "base_panel.py", "graph_hierarchy.py", "console.py"):
-                module_name = f"gui.panels.{filename[:-3]}"
-                try:
-                    module = importlib.import_module(module_name)
-                    for name, obj in inspect.getmembers(module):
-                        if (inspect.isclass(obj) and
-                            issubclass(obj, BasePanel) and
-                            obj is not BasePanel):
-                            self._instantiate_panel(obj)
-                except Exception as e:
-                    log.error(f"Failed to load panel module {module_name}: {e}")
+                        self._instantiate_panel(obj)
+            except Exception as e:
+                log.error(f"Failed to load panel module {modname}: {e}")
 
     def _instantiate_panel(self, panel_class: Type[BasePanel]):
         try:
             panel = panel_class(self.main_window)
             self.panels[panel.ID] = panel
-            
-            # Standard placement
+
             self.main_window.addDockWidget(panel.DEFAULT_AREA, panel)
-            
-            # Add to the View menu (Window toggle)
+
             if hasattr(self.main_window, "panels_menu"):
                 self.main_window.panels_menu.addAction(panel.toggleViewAction())
         except Exception as e:
             log.error(f"Error instantiating panel {panel_class.__name__}: {e}")
 
     def initialize_all(self):
-        """Calls setup() on all loaded panels except ConsolePanel (already initialized)."""
+        """Call setup() on all loaded panels except ConsolePanel (already initialized)."""
         for panel in self.panels.values():
-            if panel.ID != "ConsoleDock":  # Skip ConsolePanel, already setup early
+            if panel.ID != "ConsoleDock":
                 panel.setup()
 
     def get_panel(self, panel_id: str) -> BasePanel:

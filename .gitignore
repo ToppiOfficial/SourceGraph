@@ -226,3 +226,6 @@ _testcases/
 icons/*.psd
 workspace/autosave.json
 config/recent_nodes.json
+
+# Not yet, still in alpha.
+docs/

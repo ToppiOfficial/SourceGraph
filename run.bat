@@ -44,7 +44,7 @@ if not exist ".venv\Scripts\activate.bat" (
 )
 
 :: Start the application
-echo [INFO] Starting SrcGraph (main.py)...
+echo [INFO] Starting SourceGraph (main.py)...
 python main.py
 
 if %errorlevel% neq 0 (

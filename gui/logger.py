@@ -73,7 +73,8 @@ class AppLogger:
 
         # Always print to process stdout/stderr so headless runs still work.
         stream = sys.__stderr__ if level >= Level.ERROR else sys.__stdout__
-        stream.write(f"[{ts}] {label}  {message}\n")
+        if stream is not None:
+            stream.write(f"[{ts}] {label}  {message}\n")
 
         # Push to the GUI console widget if available.
         if self._sink is not None:
