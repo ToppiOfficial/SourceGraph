@@ -1,4 +1,4 @@
-from core.node import BaseNode, In, Out
+from sourcegraph.sys import BaseNode, In, Out
 
 
 class MaxVerts(BaseNode):

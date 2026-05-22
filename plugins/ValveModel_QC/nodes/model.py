@@ -1,5 +1,5 @@
 from __future__ import annotations
-from core.node import BaseNode, In, DynIn, Out
+from sourcegraph.sys import BaseNode, In, DynIn, Out
 
 
 class ModelNode(BaseNode):

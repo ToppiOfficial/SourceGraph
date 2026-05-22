@@ -2,18 +2,18 @@ import sys
 import os
 import shutil
 
-# When frozen by PyInstaller, sys._MEIPASS (bundled core/gui) is already on
+# When frozen by PyInstaller, sys._MEIPASS (bundled intern/) is already on
 # sys.path. We also need the exe directory so importlib can find the external
-# nodes/ and plugins/ directories that live there.
+# plugins/ directory that lives there.
 if getattr(sys, 'frozen', False):
     _exe_dir = os.path.dirname(sys.executable)
     if _exe_dir not in sys.path:
         sys.path.insert(0, _exe_dir)
 
 from PySide6.QtWidgets import QApplication
-from core.paths import app_root
-from core.registry import discover_nodes
-from gui.main_window import MainWindow
+from sourcegraph.sys.paths import app_root
+from sourcegraph.sys.registry import discover_builtin_nodes
+from sourcegraph.gui.main_window import MainWindow
 
 
 def cleanup_pycache() -> None:
@@ -34,13 +34,13 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    from gui.splash import SrcGraphSplash
-    splash = SrcGraphSplash()
+    from sourcegraph.gui.splash import SourceGraphSplash
+    splash = SourceGraphSplash()
     splash.show()
     app.processEvents()
 
     splash.set_status("Discovering nodes…", 10)
-    discover_nodes(str(app_root() / "nodes"))
+    discover_builtin_nodes()
 
     win = MainWindow(on_progress=splash.set_status)
     win.show()

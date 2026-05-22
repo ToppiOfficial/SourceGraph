@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QDoubleSpinBox
-from core.registry import register_port_type, PortTypeSpec
+from sourcegraph.sys import register_port_type, PortTypeSpec
 
 # Matches EDIT_STYLE from gui/theme.py
 _SPINBOX_STYLE = """

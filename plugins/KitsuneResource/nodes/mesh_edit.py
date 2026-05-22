@@ -6,7 +6,7 @@ if _LIBS not in sys.path:
     sys.path.insert(0, _LIBS)
 
 import mesh_edit as _mesh_edit_lib
-from core.node import BaseNode, In, OptIn, DynIn, Out
+from sourcegraph.sys import BaseNode, In, OptIn, DynIn, Out
 
 
 class MeshEditNode(BaseNode):

@@ -1,4 +1,4 @@
-from core.registry import register_port_type, PortTypeSpec
+from sourcegraph.sys import register_port_type, PortTypeSpec
 
 register_port_type(PortTypeSpec(
     key="qc_command",

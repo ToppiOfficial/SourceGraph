@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from core.node import BaseNode, In, Out
+from sourcegraph.sys import BaseNode, In, Out
 
 
 class SequenceNode(BaseNode):

@@ -7,7 +7,7 @@ if _LIBS not in sys.path:
     sys.path.insert(0, _LIBS)
 
 import vrd as _vrd_lib
-from core.node import BaseNode, In, OptIn, DynIn, Out
+from sourcegraph.sys import BaseNode, In, OptIn, DynIn, Out
 
 
 class DriverBoneNode(BaseNode):
